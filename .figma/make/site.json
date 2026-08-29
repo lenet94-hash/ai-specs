@@ -1,0 +1,10 @@
+{
+  "description": "Generates consistent design system component specs from screenshots or Figma nodes, streamlining UI documentation for designers and developers.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
