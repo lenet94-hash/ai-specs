@@ -13,7 +13,7 @@ export default function Cta() {
           </h2>
 
           <p className="font-inter font-normal text-[17px] leading-[29px] text-accent1 text-center max-w-[640px] pb-[40px]">
-            Підключи Figma і згенеруй першу специфікацію за кілька хвилин. Без попередніх налаштувань, без токенів наперед — лише твій компонент.
+            Встанови плагін, обери компонент у Figma — і специфікація готова за секунди. Без попередніх налаштувань.
           </p>
 
           <FigmaConnectButton />

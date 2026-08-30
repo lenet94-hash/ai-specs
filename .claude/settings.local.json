@@ -4,7 +4,21 @@
       "Bash(npm run:*)",
       "Bash(npx tsc:*)",
       "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(vercel --version)",
+      "Bash(npm i:*)",
+      "Bash(sudo npm:*)",
+      "Bash(~/.local/bin/vercel --version 2>&1)",
+      "Bash(~/.local/bin/vercel --yes 2>&1)",
+      "Bash(~/.local/bin/vercel login:*)",
+      "Bash(~/.local/bin/vercel --prod 2>&1)",
+      "Bash(npm install:*)",
+      "Bash(git checkout:*)",
+      "Bash(zip ../public/ai-specs-plugin.zip manifest.json code.js ui.html)",
+      "Read(//Users/elenakurochka/Documents/public/**)",
+      "Bash(mkdir -p /Users/elenakurochka/Documents/ai-specs/public)",
+      "Bash(zip /Users/elenakurochka/Documents/ai-specs/public/ai-specs-plugin.zip manifest.json code.js ui.html)"
     ]
   }
 }

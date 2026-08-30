@@ -95,7 +95,7 @@ export default function Hero() {
             Специфікації компонентів за хвилини
           </h1>
           <p className="font-inter font-normal text-[17px] leading-[29px] text-[#8fb4ce] text-center mt-[24px] max-w-[520px]">
-            Обери ноду компонента в Figma, додай короткий бриф — і отримай специфікацію в консистентному форматі.
+            Встанови плагін AI Specs у Figma Desktop, обери компонент — і отримай структуровану специфікацію за секунди.
           </p>
           <div className="mt-[40px] flex justify-center">
             <FigmaConnectButton />

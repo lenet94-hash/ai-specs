@@ -1,7 +1,7 @@
 export default function FigmaConnectButton() {
   return (
     <div className="flex flex-col items-center gap-[12px]">
-      <a href="/connect-figma">
+      <a href="/ai-specs-plugin.zip" download>
         <button
           className={[
             "bg-brand hover:bg-brand-hover active:bg-[#2580b8]",
@@ -12,11 +12,11 @@ export default function FigmaConnectButton() {
             "flex items-center justify-center",
           ].join(" ")}
         >
-          Підключити Figma
+          Завантажити плагін
         </button>
       </a>
       <p className="font-inter font-normal text-[12px] leading-[18px] text-accent2">
-        Підключення займає менше хвилини.
+        Працює прямо у Figma, без токенів і налаштувань.
       </p>
     </div>
   );

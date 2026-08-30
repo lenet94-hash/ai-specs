@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Specs</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:         #0F1117;
+      --surface:    #181C26;
+      --border:     #252A36;
+      --accent:     #2F8FDE;
+      --accent-2:   #3AA9C9;
+      --text:       #E2E8F0;
+      --text-muted: #6B7280;
+      --token:      #3AA9C9;
+      --direct:     #6B7280;
+      --missing:    #EF4444;
+      --row-odd:    #181C26;
+      --row-even:   #1C2130;
+      --font:       -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 12px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .logo-mark {
+      width: 22px;
+      height: 22px;
+      border-radius: 5px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.5px;
+      flex-shrink: 0;
+    }
+
+    .plugin-name {
+      font-size: 13px;
+      font-weight: 600;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    /* ── Node info ── */
+    #node-info {
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+    }
+
+    .node-name {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 340px;
+    }
+
+    .node-type {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      flex-shrink: 0;
+    }
+
+    /* ── States ── */
+    #state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 40px 24px;
+      color: var(--text-muted);
+      text-align: center;
+    }
+
+    .state-icon { font-size: 28px; }
+    .state-title { font-size: 13px; font-weight: 500; color: var(--text); }
+    .state-hint  { font-size: 11px; color: var(--text-muted); }
+
+    /* ── Table ── */
+    #table-wrap {
+      overflow-x: hidden;
+      padding: 8px 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    col.col-prop  { width: 34%; }
+    col.col-val   { width: 36%; }
+    col.col-src   { width: 30%; }
+
+    thead th {
+      padding: 4px 16px;
+      text-align: left;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+    }
+
+    tbody tr:nth-child(odd)  { background: var(--row-odd); }
+    tbody tr:nth-child(even) { background: var(--row-even); }
+
+    tbody td {
+      padding: 5px 16px;
+      vertical-align: middle;
+      word-break: break-word;
+    }
+
+    td.prop-label {
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+
+    td.prop-value {
+      color: var(--text);
+      font-size: 11px;
+      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    }
+
+    td.prop-value.missing { color: var(--missing); font-style: italic; }
+
+    td.prop-source { font-size: 10px; }
+
+    .badge {
+      display: inline-flex;
+      align-items: flex-start;
+      gap: 3px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 500;
+      white-space: normal;
+      word-break: break-all;
+    }
+
+    .badge-token {
+      background: rgba(58, 169, 201, 0.12);
+      color: var(--token);
+      border: 1px solid rgba(58, 169, 201, 0.2);
+    }
+
+    .badge-direct {
+      background: rgba(107, 114, 128, 0.12);
+      color: var(--direct);
+      border: 1px solid rgba(107, 114, 128, 0.2);
+    }
+
+    .badge-auto {
+      background: rgba(47, 143, 222, 0.10);
+      color: var(--accent);
+      border: 1px solid rgba(47, 143, 222, 0.2);
+    }
+
+    .badge-warn {
+      background: rgba(239, 68, 68, 0.10);
+      color: var(--missing);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+    }
+
+    /* ── Token name ── */
+    .token-name {
+      font-size: 9px;
+      color: var(--token);
+      opacity: 0.75;
+      display: block;
+      margin-top: 1px;
+      font-family: "SF Mono", monospace;
+    }
+
+    /* ── Footer / Actions ── */
+    footer {
+      padding: 10px 16px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    button {
+      cursor: pointer;
+      border: none;
+      border-radius: 6px;
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 6px 14px;
+      transition: opacity 0.15s;
+    }
+
+    button:hover  { opacity: 0.85; }
+    button:active { opacity: 0.7; }
+
+    #copy-btn {
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #fff;
+    }
+
+    #copy-btn:disabled {
+      background: var(--border);
+      color: var(--text-muted);
+      cursor: default;
+      opacity: 1;
+    }
+
+    .copy-ok {
+      font-size: 10px;
+      color: var(--token);
+      margin-right: 8px;
+      align-self: center;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .copy-ok.show { opacity: 1; }
+
+    /* ── Error ── */
+    #error-box {
+      display: none;
+      margin: 12px 16px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      background: rgba(239, 68, 68, 0.08);
+      border: 1px solid rgba(239, 68, 68, 0.25);
+      color: var(--missing);
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo-mark">AI</div>
+  <span class="plugin-name">AI Specs</span>
+</header>
+
+<div id="node-info" style="display:none;">
+  <span class="node-name" id="node-name-text"></span>
+  <span class="node-type"  id="node-type-text"></span>
+</div>
+
+<div id="state">
+  <div class="state-icon">↖</div>
+  <div class="state-title">Виберіть елемент</div>
+  <div class="state-hint">Клацніть на будь-який шар у Figma, щоб побачити специфікацію</div>
+</div>
+
+<div id="error-box"></div>
+
+<div id="table-wrap" style="display:none;">
+  <table>
+    <colgroup>
+      <col class="col-prop">
+      <col class="col-val">
+      <col class="col-src">
+    </colgroup>
+    <thead>
+      <tr>
+        <th>Властивість</th>
+        <th>Значення</th>
+        <th>Джерело</th>
+      </tr>
+    </thead>
+    <tbody id="spec-body"></tbody>
+  </table>
+</div>
+
+<footer>
+  <span class="copy-ok" id="copy-ok-msg">Скопійовано!</span>
+  <button id="copy-btn" disabled>Скопіювати як Markdown</button>
+</footer>
+
+<script>
+  // ─── State ───────────────────────────────────────────────────────────────
+
+  let currentFields = null;
+
+  const state      = document.getElementById('state');
+  const nodeInfo   = document.getElementById('node-info');
+  const nodeNameEl = document.getElementById('node-name-text');
+  const nodeTypeEl = document.getElementById('node-type-text');
+  const tableWrap  = document.getElementById('table-wrap');
+  const specBody   = document.getElementById('spec-body');
+  const copyBtn    = document.getElementById('copy-btn');
+  const copyOkMsg  = document.getElementById('copy-ok-msg');
+  const errorBox   = document.getElementById('error-box');
+
+  // ─── Source → badge ──────────────────────────────────────────────────────
+
+  function sourceBadge(source) {
+    if (!source) return '<span class="badge badge-direct">—</span>';
+
+    if (source.startsWith('токен:')) {
+      const name = source.replace('токен:', '').trim();
+      return `<span class="badge badge-token">◈ <span class="token-name" title="${name}">${name}</span></span>`;
+    }
+    if (source === 'токен використано, деталі отримати не вдалося') {
+      return '<span class="badge badge-warn">⚠ токен</span>';
+    }
+    if (source === 'розраховується автоматично') {
+      return '<span class="badge badge-auto">⚡ auto</span>';
+    }
+    // "пряме значення"
+    return '<span class="badge badge-direct">пряме</span>';
+  }
+
+  function truncate(str, max) {
+    return str.length > max ? str.slice(0, max) + '…' : str;
+  }
+
+  // ─── Render table ────────────────────────────────────────────────────────
+
+  function renderSpec(nodeName, nodeType, fields) {
+    currentFields = fields;
+
+    nodeNameEl.textContent = nodeName;
+    nodeTypeEl.textContent = nodeType;
+
+    nodeInfo.style.display  = 'flex';
+    state.style.display     = 'none';
+    tableWrap.style.display = 'block';
+    errorBox.style.display  = 'none';
+    copyBtn.disabled        = false;
+
+    specBody.innerHTML = fields.map(({ label, value, source }) => {
+      const isMissing = value === 'не знайдено';
+      const valueClass = isMissing ? 'prop-value missing' : 'prop-value';
+      return `<tr>
+        <td class="prop-label">${label}</td>
+        <td class="${valueClass}">${value}</td>
+        <td class="prop-source">${sourceBadge(source)}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ─── Show state messages ─────────────────────────────────────────────────
+
+  function showState(icon, title, hint) {
+    state.innerHTML = `
+      <div class="state-icon">${icon}</div>
+      <div class="state-title">${title}</div>
+      <div class="state-hint">${hint}</div>`;
+    state.style.display     = 'flex';
+    tableWrap.style.display = 'none';
+    nodeInfo.style.display  = 'none';
+    errorBox.style.display  = 'none';
+    copyBtn.disabled        = true;
+    currentFields           = null;
+  }
+
+  function showError(msg) {
+    state.innerHTML = `
+      <div class="state-icon">⚠</div>
+      <div class="state-title" style="color:var(--accent-2)">Не вдалося зчитати елемент</div>
+      <div class="state-hint">${msg}</div>`;
+    state.style.display     = 'flex';
+    tableWrap.style.display = 'none';
+    nodeInfo.style.display  = 'none';
+    errorBox.style.display  = 'none';
+    copyBtn.disabled        = true;
+    currentFields           = null;
+  }
+
+  // ─── Message handler ─────────────────────────────────────────────────────
+
+  window.onmessage = (event) => {
+    const msg = event.data.pluginMessage;
+    if (!msg) return;
+
+    switch (msg.type) {
+      case 'spec-data': {
+        const { nodeName, nodeType, fields } = msg.payload;
+        renderSpec(nodeName, nodeType, fields);
+        break;
+      }
+      case 'no-selection':
+        showState('↖', 'Виберіть елемент', 'Клацніть на будь-який шар у Figma');
+        break;
+      case 'multi-selection':
+        showState('⊟', 'Кілька елементів', 'Оберіть лише один елемент за раз');
+        break;
+      case 'error':
+        showError(msg.message);
+        break;
+    }
+  };
+
+  // ─── Copy as Markdown ────────────────────────────────────────────────────
+
+  copyBtn.addEventListener('click', async () => {
+    if (!currentFields) return;
+
+    const header = '| Властивість | Значення | Джерело |';
+    const sep    = '|-------------|----------|---------|';
+    const rows   = currentFields.map(({ label, value, source }) => {
+      // Strip token prefix for plain text
+      let srcText = source || '—';
+      if (srcText.startsWith('токен:')) srcText = '`' + srcText.replace('токен:', '').trim() + '`';
+      return `| ${label} | ${value} | ${srcText} |`;
+    });
+
+    const md = [header, sep, ...rows].join('\n');
+
+    try {
+      await navigator.clipboard.writeText(md);
+      copyOkMsg.classList.add('show');
+      setTimeout(() => copyOkMsg.classList.remove('show'), 2000);
+    } catch {
+      // Fallback: prompt
+      const ta = document.createElement('textarea');
+      ta.value = md;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      copyOkMsg.classList.add('show');
+      setTimeout(() => copyOkMsg.classList.remove('show'), 2000);
+    }
+  });
+</script>
+</body>
+</html>

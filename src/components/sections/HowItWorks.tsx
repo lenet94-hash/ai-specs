@@ -64,6 +64,7 @@ function Step({ number, title, description, isLast = false }: StepProps) {
 export default function HowItWorks() {
   return (
     <section
+      id="how-it-works"
       className="bg-bg2 border-t border-border1 w-full px-[80px] py-[64px]"
       data-name="Section"
     >
@@ -81,23 +82,23 @@ export default function HowItWorks() {
           <div className="grid grid-cols-4 mt-[40px] max-[1020px]:grid-cols-1">
             <Step
               number={1}
-              title="Крок 1. Підготуй контекст"
-              description="Обери Figma-ноду компонента. Додай короткий бриф: що це за компонент, де і навіщо він використовується, які стани. Якщо є пов'язані токени чи гайдлайни — вкажи їх окремо."
+              title="Крок 1. Встанови плагін"
+              description="Відкрий Figma Desktop → Plugins → Development → Import plugin from manifest. Вкажи файл manifest.json з архіву плагіна. Установка займає менше хвилини."
             />
             <Step
               number={2}
-              title="Крок 2. Завантаж"
-              description="Підключи Figma-ноду разом з брифом. Жодних складних форм — лише те, що реально потрібно для розуміння компонента."
+              title="Крок 2. Обери компонент"
+              description="Клікни на будь-який елемент у Figma — фрейм, компонент або інстанс. Плагін автоматично зчитає всі параметри обраної ноди."
             />
             <Step
               number={3}
-              title="Крок 3. Отримай специфікацію"
-              description="AI аналізує вихідні дані й формує структурований опис: параметри, значення, стани, поведінку — у консистентному форматі."
+              title="Крок 3. Переглянь специфікацію"
+              description="Плагін формує структурований опис прямо в панелі: відступи, кольори, типографіку, тіні — з посиланнями на токени, де вони є."
             />
             <Step
               number={4}
-              title="Крок 4. Перевір і затверди"
-              description="Переглянь згенеровану специфікацію, скоригуй за потреби й затверди фінальну версію. Останнє слово — завжди за тобою."
+              title="Крок 4. Скопіюй і використай"
+              description="Скопіюй специфікацію як Markdown одним кліком і використай у документації, Notion або Confluence."
               isLast
             />
           </div>
