@@ -1,4 +1,6 @@
-export const runtime = "edge";
+export const config = {
+  runtime: "edge",
+};
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
