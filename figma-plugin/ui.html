@@ -212,7 +212,8 @@
       padding: 10px 16px;
       border-top: 1px solid var(--border);
       display: flex;
-      justify-content: flex-end;
+      align-items: center;
+      gap: 8px;
     }
 
     button {
@@ -351,6 +352,56 @@
     #variant-wrap tbody tr.diff td:first-child::before {
       content: "\25C6 "; color: var(--accent); font-size: 9px;
     }
+
+    /* ── AI Documentation ── */
+    #ai-doc-wrap {
+      border-top: 1px solid var(--border);
+      padding: 10px 16px 12px;
+    }
+
+    .ai-doc-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .ai-doc-header-title {
+      font-size: 10px; font-weight: 600; letter-spacing: 0.6px;
+      text-transform: uppercase; color: var(--text-muted);
+    }
+    .ai-doc-badge {
+      font-size: 9px; padding: 1px 6px; border-radius: 4px;
+      background: rgba(47, 143, 222, 0.1); color: var(--accent);
+      border: 1px solid rgba(47, 143, 222, 0.2);
+    }
+
+    .ai-doc-sections { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    .ai-doc-section {}
+    .ai-doc-title {
+      font-size: 10px; font-weight: 600; color: var(--accent-2);
+      margin-bottom: 4px; letter-spacing: 0.3px;
+    }
+    .ai-doc-list { list-style: none; padding: 0; margin: 0; }
+    .ai-doc-list li {
+      padding: 2px 0 2px 10px; font-size: 11px;
+      color: var(--text); line-height: 1.4; position: relative;
+    }
+    .ai-doc-list li::before {
+      content: '—'; position: absolute; left: 0; color: var(--text-muted);
+    }
+
+    .ai-doc-error { color: var(--missing); font-size: 11px; padding: 4px 0; }
+
+    /* ── Generate button ── */
+    #gen-btn {
+      background: rgba(47, 143, 222, 0.1);
+      color: var(--accent);
+      border: 1px solid rgba(47, 143, 222, 0.25);
+    }
+    #gen-btn:disabled {
+      background: var(--border); color: var(--text-muted);
+      cursor: default; opacity: 1; border: none;
+    }
+    #gen-btn.loading { opacity: 0.6; cursor: default; }
   </style>
 </head>
 <body>
@@ -402,7 +453,11 @@
   <div id="accordion-container"></div>
 </div>
 
+<div id="ai-doc-wrap" style="display:none;"></div>
+
 <footer>
+  <button id="gen-btn" disabled>✦ Generate Doc</button>
+  <span style="flex:1"></span>
   <span class="copy-ok" id="copy-ok-msg">Скопійовано!</span>
   <button id="copy-btn" disabled>Скопіювати як Markdown</button>
 </footer>
@@ -414,6 +469,7 @@
   let currentFields = null;
   let currentComponents = null;
   let currentVariantData = null;
+  let currentAiDoc = null;
 
   const state      = document.getElementById('state');
   const nodeInfo   = document.getElementById('node-info');
@@ -431,18 +487,22 @@
   const variantInfo = document.getElementById('variant-info');
   const variantFixedProps = document.getElementById('variant-fixed-props');
   const variantTableContainer = document.getElementById('variant-table-container');
+  const aiDocWrap  = document.getElementById('ai-doc-wrap');
+  const genBtn     = document.getElementById('gen-btn');
 
   function hideAll() {
     state.style.display       = 'none';
     tableWrap.style.display   = 'none';
     multiWrap.style.display   = 'none';
     variantWrap.style.display = 'none';
+    aiDocWrap.style.display   = 'none';
     nodeInfo.style.display    = 'none';
     errorBox.style.display    = 'none';
     currentMode = null;
     currentFields = null;
     currentComponents = null;
     currentVariantData = null;
+    currentAiDoc = null;
   }
 
   // ─── Source → badge ──────────────────────────────────────────────────────
@@ -472,6 +532,7 @@
     nodeInfo.style.display  = 'flex';
     tableWrap.style.display = 'block';
     copyBtn.disabled        = false;
+    genBtn.disabled         = false;
 
     specBody.innerHTML = fields.map(function(f) {
       var cls = f.value === 'не знайдено' ? 'prop-value missing' : 'prop-value';
@@ -539,6 +600,7 @@
     nodeInfo.style.display    = 'flex';
     variantWrap.style.display = 'block';
     copyBtn.disabled          = false;
+    genBtn.disabled           = false;
 
     if (!data.hasStateProperty) {
       variantInfo.innerHTML = '<span class="variant-warn">Показано всі variants — властивість стану не визначена</span>';
@@ -719,6 +781,92 @@
     return lines.join('\n');
   }
 
+  // ─── AI Doc render ───────────────────────────────────────────────────────
+
+  var AI_SECTIONS = [
+    { key: 'usageGuidelines',  title: 'Usage Guidelines' },
+    { key: 'contentGuidelines', title: 'Content Guidelines' },
+    { key: 'behavior',         title: 'Behavior' },
+    { key: 'edgeCases',        title: 'Edge Cases' },
+  ];
+
+  function renderAiDoc(data) {
+    var sectionsHtml = AI_SECTIONS.map(function(s) {
+      var items = (data[s.key] || []).map(function(item) {
+        return '<li>' + item + '</li>';
+      }).join('');
+      return '<div class="ai-doc-section">'
+        + '<div class="ai-doc-title">' + s.title + '</div>'
+        + '<ul class="ai-doc-list">' + items + '</ul>'
+        + '</div>';
+    }).join('');
+
+    aiDocWrap.innerHTML = '<div class="ai-doc-header">'
+      + '<span class="ai-doc-header-title">AI Documentation</span>'
+      + '<span class="ai-doc-badge">✦ Claude</span>'
+      + '</div>'
+      + '<div class="ai-doc-sections">' + sectionsHtml + '</div>';
+    aiDocWrap.style.display = 'block';
+  }
+
+  // ─── Generate Doc button ─────────────────────────────────────────────────
+
+  genBtn.addEventListener('click', async function() {
+    if (genBtn.disabled || genBtn.classList.contains('loading')) return;
+
+    var componentName = nodeNameEl.textContent;
+    var componentType = nodeTypeEl.textContent;
+    var props = {};
+
+    if (currentMode === 'single' && currentFields) {
+      currentFields.forEach(function(f) { props[f.label] = f.value; });
+    } else if (currentMode === 'variant' && currentVariantData && currentVariantData.variants.length > 0) {
+      currentVariantData.variants[0].fields.forEach(function(f) { props[f.label] = f.value; });
+      componentName = currentVariantData.componentSetName;
+      componentType = 'COMPONENT_SET';
+    } else {
+      return;
+    }
+
+    genBtn.classList.add('loading');
+    genBtn.disabled = true;
+    genBtn.textContent = 'Генерується…';
+    aiDocWrap.style.display = 'none';
+
+    try {
+      var res = await fetch('https://ai-specs.vercel.app/api/generate-spec', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ componentName: componentName, componentType: componentType, properties: props }),
+      });
+
+      if (!res.ok) {
+        var errData = await res.json().catch(function() { return {}; });
+        throw new Error(errData.error || ('HTTP ' + res.status));
+      }
+
+      var data = await res.json();
+      currentAiDoc = data;
+      renderAiDoc(data);
+    } catch (e) {
+      aiDocWrap.innerHTML = '<div class="ai-doc-error">⚠ ' + (e.message || 'Помилка генерації') + '</div>';
+      aiDocWrap.style.display = 'block';
+    }
+
+    genBtn.classList.remove('loading');
+    genBtn.disabled = false;
+    genBtn.textContent = '✦ Generate Doc';
+  });
+
+  // ─── Copy as Markdown ────────────────────────────────────────────────────
+
+  function aiDocToMarkdown(data) {
+    return AI_SECTIONS.map(function(s) {
+      var items = (data[s.key] || []).map(function(i) { return '- ' + i; }).join('\n');
+      return '### ' + s.title + '\n' + items;
+    }).join('\n\n');
+  }
+
   copyBtn.addEventListener('click', async function() {
     var md;
 
@@ -732,6 +880,10 @@
       md = fieldsToMarkdownTable(currentFields);
     } else {
       return;
+    }
+
+    if (currentAiDoc) {
+      md += '\n\n' + aiDocToMarkdown(currentAiDoc);
     }
 
     try {
