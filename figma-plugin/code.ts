@@ -394,9 +394,96 @@ async function buildSpec(node: SceneNode): Promise<SpecField[]> {
   return fields;
 }
 
+// ─── Container scan helpers ──────────────────────────────────────────────────
+
+function isContainerForScan(node: SceneNode): boolean {
+  return (
+    node.type === "FRAME" ||
+    node.type === "SECTION" ||
+    node.type === "GROUP" ||
+    node.type === "COMPONENT_SET"
+  );
+}
+
+function findTopLevelComponents(
+  container: FrameNode | SectionNode | GroupNode | ComponentSetNode
+): SceneNode[] {
+  const results: SceneNode[] = [];
+  function walk(node: SceneNode) {
+    if (node.type === "INSTANCE" || node.type === "COMPONENT") {
+      results.push(node);
+      return;
+    }
+    if ("children" in node) {
+      for (const child of (node as ChildrenMixin).children) {
+        walk(child as SceneNode);
+      }
+    }
+  }
+  for (const child of container.children) {
+    walk(child as SceneNode);
+  }
+  return results;
+}
+
+// ─── Variant resolution (async — needed for external library components) ─────
+
+interface VariantResolution {
+  componentSet: ComponentSetNode;
+  stateVariants: ComponentNode[];
+  hasStateProperty: boolean;
+  fixedProps: Record<string, string>;
+}
+
+async function tryResolveVariants(
+  node: SceneNode
+): Promise<VariantResolution | null> {
+  let componentSet: ComponentSetNode | null = null;
+  let selectedComponent: ComponentNode | null = null;
+
+  if (node.type === "INSTANCE") {
+    const main = await (node as InstanceNode).getMainComponentAsync();
+    if (main && main.parent?.type === "COMPONENT_SET") {
+      componentSet = main.parent as ComponentSetNode;
+      selectedComponent = main;
+    }
+  } else if (node.type === "COMPONENT") {
+    if (node.parent?.type === "COMPONENT_SET") {
+      componentSet = node.parent as ComponentSetNode;
+      selectedComponent = node as ComponentNode;
+    }
+  }
+
+  if (!componentSet || !selectedComponent) return null;
+
+  const selectedProps = selectedComponent.variantProperties ?? {};
+  const hasStateProperty = "State" in selectedProps;
+
+  if (hasStateProperty) {
+    const fixedProps: Record<string, string> = {};
+    for (const [key, val] of Object.entries(selectedProps)) {
+      if (key !== "State") fixedProps[key] = val;
+    }
+    const stateVariants = componentSet.children.filter((child) => {
+      const childProps = (child as ComponentNode).variantProperties ?? {};
+      return Object.entries(fixedProps).every(
+        ([key, val]) => childProps[key] === val
+      );
+    }) as ComponentNode[];
+    return { componentSet, stateVariants, hasStateProperty: true, fixedProps };
+  }
+
+  return {
+    componentSet,
+    stateVariants: [...componentSet.children] as ComponentNode[],
+    hasStateProperty: false,
+    fixedProps: {},
+  };
+}
+
 // ─── Plugin entry point ──────────────────────────────────────────────────────
 
-figma.showUI(__html__, { width: 596, height: 560, themeColors: false });
+figma.showUI(__html__, { width: 680, height: 580, themeColors: false });
 
 figma.on("selectionchange", async () => {
   await analyzeSelection();
@@ -417,6 +504,76 @@ async function analyzeSelection() {
 
   const node = sel[0];
 
+  // Container scan (FRAME, SECTION, GROUP, COMPONENT_SET selected directly)
+  if (isContainerForScan(node) && node.type !== "COMPONENT") {
+    try {
+      const components = findTopLevelComponents(
+        node as FrameNode | SectionNode | GroupNode | ComponentSetNode
+      );
+      if (components.length === 0) {
+        figma.ui.postMessage({ type: "no-components-in-frame" });
+        return;
+      }
+      const specs = await Promise.all(
+        components.map(async (comp) => ({
+          nodeName: comp.name,
+          nodeType: comp.type,
+          fields: await buildSpec(comp),
+        }))
+      );
+      figma.ui.postMessage({
+        type: "multi-spec-data",
+        payload: {
+          containerName: node.name,
+          containerType: node.type,
+          components: specs,
+        },
+      });
+    } catch {
+      figma.ui.postMessage({
+        type: "error",
+        message: "Не вдалося проаналізувати вміст фрейму.",
+      });
+    }
+    return;
+  }
+
+  // Variant comparison (INSTANCE or COMPONENT that belongs to a COMPONENT_SET)
+  try {
+    const variantResult = await tryResolveVariants(node);
+    if (variantResult) {
+      const { componentSet, stateVariants, hasStateProperty, fixedProps } =
+        variantResult;
+
+      const variantSpecs = await Promise.all(
+        stateVariants.map(async (variant) => {
+          const vProps = variant.variantProperties ?? {};
+          const stateLabel = hasStateProperty
+            ? vProps["State"] ?? "Unknown"
+            : Object.values(vProps).join(" / ") || variant.name;
+          return {
+            stateLabel,
+            fields: await buildSpec(variant),
+          };
+        })
+      );
+
+      figma.ui.postMessage({
+        type: "variant-comparison-data",
+        payload: {
+          componentSetName: componentSet.name,
+          fixedProps,
+          hasStateProperty,
+          variants: variantSpecs,
+        },
+      });
+      return;
+    }
+  } catch {
+    // If variant resolution fails, fall through to single spec
+  }
+
+  // Single node — original behavior
   try {
     const fields = await buildSpec(node);
     figma.ui.postMessage({

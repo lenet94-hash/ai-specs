@@ -81,7 +81,7 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 340px;
+      max-width: 440px;
     }
 
     .node-type {
@@ -108,7 +108,7 @@
     .state-title { font-size: 13px; font-weight: 500; color: var(--text); }
     .state-hint  { font-size: 11px; color: var(--text-muted); }
 
-    /* ── Table ── */
+    /* ── Table (single spec) ── */
     #table-wrap {
       overflow-x: hidden;
       padding: 8px 0;
@@ -117,7 +117,6 @@
     table {
       width: 100%;
       border-collapse: collapse;
-      table-layout: fixed;
     }
 
     col.col-prop  { width: 34%; }
@@ -264,6 +263,94 @@
       color: var(--missing);
       font-size: 11px;
     }
+
+    /* ── Multi-component accordion ── */
+    #multi-wrap {
+      display: none;
+      padding: 0 0 8px;
+    }
+
+    .accordion-item { border-bottom: 1px solid var(--border); }
+
+    .accordion-header {
+      display: flex; align-items: center; gap: 6px;
+      padding: 8px 16px; cursor: pointer; user-select: none;
+      background: var(--surface); transition: background 0.15s;
+    }
+    .accordion-header:hover { background: var(--row-even); }
+
+    .accordion-chevron {
+      font-size: 10px; color: var(--text-muted);
+      transition: transform 0.2s; flex-shrink: 0;
+    }
+    .accordion-item.open .accordion-chevron { transform: rotate(90deg); }
+
+    .accordion-comp-name {
+      font-size: 12px; font-weight: 600; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .accordion-comp-type {
+      font-size: 10px; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0;
+    }
+
+    .accordion-body { display: none; overflow-x: hidden; }
+    .accordion-item.open .accordion-body { display: block; }
+
+    .multi-counter {
+      font-size: 10px; color: var(--text-muted); padding: 4px 16px 2px;
+    }
+
+    /* ── Variant comparison table ── */
+    #variant-wrap { display: none; overflow-x: auto; padding: 8px 0; }
+
+    .variant-info {
+      font-size: 10px; color: var(--text-muted); padding: 4px 16px 6px;
+    }
+    .variant-info .variant-warn {
+      color: var(--accent-2); font-style: italic;
+    }
+
+    .variant-fixed-props {
+      display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 16px 8px;
+    }
+    .variant-fixed-props .badge {
+      font-size: 10px;
+      background: rgba(47, 143, 222, 0.08);
+      color: var(--accent);
+      border: 1px solid rgba(47, 143, 222, 0.18);
+    }
+
+    #variant-wrap table { width: 100%; border-collapse: collapse; }
+
+    #variant-wrap thead th {
+      padding: 4px 10px; text-align: left;
+      font-size: 10px; font-weight: 600; letter-spacing: 0.5px;
+      text-transform: uppercase; color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; background: var(--bg); white-space: nowrap;
+    }
+    #variant-wrap thead th:first-child { padding-left: 16px; }
+
+    #variant-wrap tbody tr:nth-child(odd)  { background: var(--row-odd); }
+    #variant-wrap tbody tr:nth-child(even) { background: var(--row-even); }
+
+    #variant-wrap tbody td {
+      padding: 4px 10px; vertical-align: middle; word-break: break-word;
+      font-size: 11px;
+      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+      color: var(--text);
+    }
+    #variant-wrap tbody td:first-child {
+      padding-left: 16px; font-family: var(--font);
+      color: var(--text-muted); font-size: 11px;
+    }
+    #variant-wrap tbody td.missing { color: var(--missing); font-style: italic; }
+
+    #variant-wrap tbody tr.diff td { background: rgba(47, 143, 222, 0.06); }
+    #variant-wrap tbody tr.diff td:first-child::before {
+      content: "\25C6 "; color: var(--accent); font-size: 9px;
+    }
   </style>
 </head>
 <body>
@@ -304,6 +391,17 @@
   </table>
 </div>
 
+<div id="variant-wrap">
+  <div class="variant-info" id="variant-info"></div>
+  <div class="variant-fixed-props" id="variant-fixed-props"></div>
+  <div id="variant-table-container"></div>
+</div>
+
+<div id="multi-wrap">
+  <div class="multi-counter" id="multi-counter"></div>
+  <div id="accordion-container"></div>
+</div>
+
 <footer>
   <span class="copy-ok" id="copy-ok-msg">Скопійовано!</span>
   <button id="copy-btn" disabled>Скопіювати як Markdown</button>
@@ -312,7 +410,10 @@
 <script>
   // ─── State ───────────────────────────────────────────────────────────────
 
+  let currentMode = null; // 'single' | 'multi' | 'variant'
   let currentFields = null;
+  let currentComponents = null;
+  let currentVariantData = null;
 
   const state      = document.getElementById('state');
   const nodeInfo   = document.getElementById('node-info');
@@ -323,100 +424,233 @@
   const copyBtn    = document.getElementById('copy-btn');
   const copyOkMsg  = document.getElementById('copy-ok-msg');
   const errorBox   = document.getElementById('error-box');
+  const multiWrap  = document.getElementById('multi-wrap');
+  const multiCounter = document.getElementById('multi-counter');
+  const accordionContainer = document.getElementById('accordion-container');
+  const variantWrap = document.getElementById('variant-wrap');
+  const variantInfo = document.getElementById('variant-info');
+  const variantFixedProps = document.getElementById('variant-fixed-props');
+  const variantTableContainer = document.getElementById('variant-table-container');
+
+  function hideAll() {
+    state.style.display       = 'none';
+    tableWrap.style.display   = 'none';
+    multiWrap.style.display   = 'none';
+    variantWrap.style.display = 'none';
+    nodeInfo.style.display    = 'none';
+    errorBox.style.display    = 'none';
+    currentMode = null;
+    currentFields = null;
+    currentComponents = null;
+    currentVariantData = null;
+  }
 
   // ─── Source → badge ──────────────────────────────────────────────────────
 
   function sourceBadge(source) {
     if (!source) return '<span class="badge badge-direct">—</span>';
-
     if (source.startsWith('токен:')) {
       const name = source.replace('токен:', '').trim();
-      return `<span class="badge badge-token">◈ <span class="token-name" title="${name}">${name}</span></span>`;
+      return '<span class="badge badge-token">◈ <span class="token-name" title="' + name + '">' + name + '</span></span>';
     }
-    if (source === 'токен використано, деталі отримати не вдалося') {
+    if (source === 'токен використано, деталі отримати не вдалося')
       return '<span class="badge badge-warn">⚠ токен</span>';
-    }
-    if (source === 'розраховується автоматично') {
+    if (source === 'розраховується автоматично')
       return '<span class="badge badge-auto">⚡ auto</span>';
-    }
-    // "пряме значення"
     return '<span class="badge badge-direct">пряме</span>';
   }
 
-  function truncate(str, max) {
-    return str.length > max ? str.slice(0, max) + '…' : str;
-  }
-
-  // ─── Render table ────────────────────────────────────────────────────────
+  // ─── Render single spec ────────────────────────────────────────────────
 
   function renderSpec(nodeName, nodeType, fields) {
+    hideAll();
+    currentMode = 'single';
     currentFields = fields;
 
     nodeNameEl.textContent = nodeName;
     nodeTypeEl.textContent = nodeType;
-
     nodeInfo.style.display  = 'flex';
-    state.style.display     = 'none';
     tableWrap.style.display = 'block';
-    errorBox.style.display  = 'none';
     copyBtn.disabled        = false;
 
-    specBody.innerHTML = fields.map(({ label, value, source }) => {
-      const isMissing = value === 'не знайдено';
-      const valueClass = isMissing ? 'prop-value missing' : 'prop-value';
-      return `<tr>
-        <td class="prop-label">${label}</td>
-        <td class="${valueClass}">${value}</td>
-        <td class="prop-source">${sourceBadge(source)}</td>
-      </tr>`;
+    specBody.innerHTML = fields.map(function(f) {
+      var cls = f.value === 'не знайдено' ? 'prop-value missing' : 'prop-value';
+      return '<tr><td class="prop-label">' + f.label + '</td>'
+        + '<td class="' + cls + '">' + f.value + '</td>'
+        + '<td class="prop-source">' + sourceBadge(f.source) + '</td></tr>';
     }).join('');
+  }
+
+  // ─── Render multi-component accordion ──────────────────────────────────
+
+  function renderFieldsTable(fields) {
+    var rows = fields.map(function(f) {
+      var cls = f.value === 'не знайдено' ? 'prop-value missing' : 'prop-value';
+      return '<tr><td class="prop-label">' + f.label + '</td>'
+        + '<td class="' + cls + '">' + f.value + '</td>'
+        + '<td class="prop-source">' + sourceBadge(f.source) + '</td></tr>';
+    }).join('');
+    return '<table><colgroup><col class="col-prop"><col class="col-val"><col class="col-src"></colgroup>'
+      + '<thead><tr><th>Властивість</th><th>Значення</th><th>Джерело</th></tr></thead>'
+      + '<tbody>' + rows + '</tbody></table>';
+  }
+
+  function renderMultiSpec(containerName, containerType, components) {
+    hideAll();
+    currentMode = 'multi';
+    currentComponents = components;
+
+    nodeNameEl.textContent = containerName;
+    nodeTypeEl.textContent = containerType;
+    nodeInfo.style.display  = 'flex';
+    multiWrap.style.display = 'block';
+    copyBtn.disabled        = false;
+
+    multiCounter.textContent = 'Знайдено компонентів: ' + components.length;
+
+    accordionContainer.innerHTML = components.map(function(comp, i) {
+      return '<div class="accordion-item' + (i === 0 ? ' open' : '') + '">'
+        + '<div class="accordion-header" data-index="' + i + '">'
+        + '<span class="accordion-chevron">▶</span>'
+        + '<span class="accordion-comp-name">' + comp.nodeName + '</span>'
+        + '<span class="accordion-comp-type">' + comp.nodeType + '</span>'
+        + '</div><div class="accordion-body">' + renderFieldsTable(comp.fields) + '</div></div>';
+    }).join('');
+
+    accordionContainer.querySelectorAll('.accordion-header').forEach(function(header) {
+      header.addEventListener('click', function() {
+        header.parentElement.classList.toggle('open');
+      });
+    });
+  }
+
+  // ─── Render variant comparison ─────────────────────────────────────────
+
+  function renderVariantComparison(data) {
+    hideAll();
+    currentMode = 'variant';
+    currentVariantData = data;
+
+    var variants = data.variants;
+    var fixedProps = data.fixedProps;
+
+    nodeNameEl.textContent = data.componentSetName;
+    nodeTypeEl.textContent = 'COMPONENT_SET';
+    nodeInfo.style.display    = 'flex';
+    variantWrap.style.display = 'block';
+    copyBtn.disabled          = false;
+
+    if (!data.hasStateProperty) {
+      variantInfo.innerHTML = '<span class="variant-warn">Показано всі variants — властивість стану не визначена</span>';
+    } else {
+      variantInfo.textContent = 'Порівняння станів (' + variants.length + ')';
+    }
+
+    var fixedEntries = Object.entries(fixedProps);
+    if (fixedEntries.length > 0) {
+      variantFixedProps.style.display = 'flex';
+      variantFixedProps.innerHTML = fixedEntries.map(function(e) {
+        return '<span class="badge">' + e[0] + ': ' + e[1] + '</span>';
+      }).join('');
+    } else {
+      variantFixedProps.style.display = 'none';
+    }
+
+    // Collect all unique property labels
+    var allLabels = [];
+    var labelSet = {};
+    variants.forEach(function(v) {
+      v.fields.forEach(function(f) {
+        if (!labelSet[f.label]) { labelSet[f.label] = true; allLabels.push(f.label); }
+      });
+    });
+
+    var stateLabels = variants.map(function(v) { return v.stateLabel; });
+    var fieldMaps = variants.map(function(v) {
+      var m = {};
+      v.fields.forEach(function(f) { m[f.label] = { value: f.value, source: f.source }; });
+      return m;
+    });
+
+    function rowHasDiff(label) {
+      var first = fieldMaps[0][label] ? fieldMaps[0][label].value : '—';
+      for (var i = 1; i < fieldMaps.length; i++) {
+        var val = fieldMaps[i][label] ? fieldMaps[i][label].value : '—';
+        if (val !== first) return true;
+      }
+      return false;
+    }
+
+    function cellHtml(field) {
+      if (!field) return '<td class="missing">—</td>';
+      var val = field.value;
+      var cls = val === 'не знайдено' ? ' class="missing"' : '';
+      var src = field.source || '';
+      if (src.startsWith('токен:')) {
+        var name = src.replace('токен:', '').trim();
+        return '<td' + cls + '>'
+          + '<span style="color:var(--text);font-weight:500;">' + name + '</span>'
+          + '<span class="token-name" style="display:block;margin-top:1px;opacity:0.5;">' + val + '</span>'
+          + '</td>';
+      }
+      return '<td' + cls + '>' + val + '</td>';
+    }
+
+    var headerCols = stateLabels.map(function(s) { return '<th>' + s + '</th>'; }).join('');
+    var bodyRows = allLabels.map(function(label) {
+      var isDiff = rowHasDiff(label);
+      var cells = fieldMaps.map(function(m) { return cellHtml(m[label]); }).join('');
+      return '<tr class="' + (isDiff ? 'diff' : '') + '"><td>' + label + '</td>' + cells + '</tr>';
+    }).join('');
+
+    variantTableContainer.innerHTML = '<table><thead><tr><th>Властивість</th>'
+      + headerCols + '</tr></thead><tbody>' + bodyRows + '</tbody></table>';
   }
 
   // ─── Show state messages ─────────────────────────────────────────────────
 
   function showState(icon, title, hint) {
-    state.innerHTML = `
-      <div class="state-icon">${icon}</div>
-      <div class="state-title">${title}</div>
-      <div class="state-hint">${hint}</div>`;
-    state.style.display     = 'flex';
-    tableWrap.style.display = 'none';
-    nodeInfo.style.display  = 'none';
-    errorBox.style.display  = 'none';
-    copyBtn.disabled        = true;
-    currentFields           = null;
+    hideAll();
+    state.innerHTML = '<div class="state-icon">' + icon + '</div>'
+      + '<div class="state-title">' + title + '</div>'
+      + '<div class="state-hint">' + hint + '</div>';
+    state.style.display = 'flex';
+    copyBtn.disabled = true;
   }
 
   function showError(msg) {
-    state.innerHTML = `
-      <div class="state-icon">⚠</div>
-      <div class="state-title" style="color:var(--accent-2)">Не вдалося зчитати елемент</div>
-      <div class="state-hint">${msg}</div>`;
-    state.style.display     = 'flex';
-    tableWrap.style.display = 'none';
-    nodeInfo.style.display  = 'none';
-    errorBox.style.display  = 'none';
-    copyBtn.disabled        = true;
-    currentFields           = null;
+    hideAll();
+    state.innerHTML = '<div class="state-icon">⚠</div>'
+      + '<div class="state-title" style="color:var(--accent-2)">Не вдалося зчитати елемент</div>'
+      + '<div class="state-hint">' + msg + '</div>';
+    state.style.display = 'flex';
+    copyBtn.disabled = true;
   }
 
   // ─── Message handler ─────────────────────────────────────────────────────
 
-  window.onmessage = (event) => {
-    const msg = event.data.pluginMessage;
+  window.onmessage = function(event) {
+    var msg = event.data.pluginMessage;
     if (!msg) return;
 
     switch (msg.type) {
-      case 'spec-data': {
-        const { nodeName, nodeType, fields } = msg.payload;
-        renderSpec(nodeName, nodeType, fields);
+      case 'spec-data':
+        renderSpec(msg.payload.nodeName, msg.payload.nodeType, msg.payload.fields);
         break;
-      }
+      case 'multi-spec-data':
+        renderMultiSpec(msg.payload.containerName, msg.payload.containerType, msg.payload.components);
+        break;
+      case 'variant-comparison-data':
+        renderVariantComparison(msg.payload);
+        break;
       case 'no-selection':
         showState('↖', 'Виберіть елемент', 'Клацніть на будь-який шар у Figma');
         break;
       case 'multi-selection':
         showState('⊟', 'Кілька елементів', 'Оберіть лише один елемент за раз');
+        break;
+      case 'no-components-in-frame':
+        showState('◇', 'Компоненти не знайдено', 'На цьому фреймі не знайдено компонентів');
         break;
       case 'error':
         showError(msg.message);
@@ -426,34 +660,93 @@
 
   // ─── Copy as Markdown ────────────────────────────────────────────────────
 
-  copyBtn.addEventListener('click', async () => {
-    if (!currentFields) return;
-
-    const header = '| Властивість | Значення | Джерело |';
-    const sep    = '|-------------|----------|---------|';
-    const rows   = currentFields.map(({ label, value, source }) => {
-      // Strip token prefix for plain text
-      let srcText = source || '—';
+  function fieldsToMarkdownTable(fields) {
+    var header = '| Властивість | Значення | Джерело |';
+    var sep    = '|-------------|----------|---------|';
+    var rows   = fields.map(function(f) {
+      var srcText = f.source || '—';
       if (srcText.startsWith('токен:')) srcText = '`' + srcText.replace('токен:', '').trim() + '`';
-      return `| ${label} | ${value} | ${srcText} |`;
+      return '| ' + f.label + ' | ' + f.value + ' | ' + srcText + ' |';
+    });
+    return [header, sep].concat(rows).join('\n');
+  }
+
+  function variantToMarkdown(data) {
+    var lines = ['## ' + data.componentSetName];
+    var fixedEntries = Object.entries(data.fixedProps);
+    if (fixedEntries.length > 0) {
+      lines.push('');
+      lines.push(fixedEntries.map(function(e) { return '**' + e[0] + '**: ' + e[1]; }).join(' | '));
+    }
+    if (!data.hasStateProperty) {
+      lines.push('');
+      lines.push('> _Показано всі variants — властивість стану не визначена_');
+    }
+
+    var allLabels = []; var labelSet = {};
+    data.variants.forEach(function(v) {
+      v.fields.forEach(function(f) {
+        if (!labelSet[f.label]) { labelSet[f.label] = true; allLabels.push(f.label); }
+      });
     });
 
-    const md = [header, sep, ...rows].join('\n');
+    var stateLabels = data.variants.map(function(v) { return v.stateLabel; });
+    var fMaps = data.variants.map(function(v) {
+      var m = {};
+      v.fields.forEach(function(f) { m[f.label] = { value: f.value, source: f.source }; });
+      return m;
+    });
+
+    lines.push('');
+    lines.push('| Властивість | ' + stateLabels.join(' | ') + ' |');
+    lines.push('|---' + stateLabels.map(function() { return '|---'; }).join('') + '|');
+
+    allLabels.forEach(function(label) {
+      var vals = fMaps.map(function(m) {
+        if (!m[label]) return '—';
+        var v = m[label].value;
+        var s = m[label].source || '';
+        if (s.startsWith('токен:')) return v + ' (`' + s.replace('токен:', '').trim() + '`)';
+        return v;
+      });
+      var rawVals = fMaps.map(function(m) { return m[label] ? m[label].value : '—'; });
+      var isDiff = rawVals.some(function(v) { return v !== rawVals[0]; });
+      var pre = isDiff ? '**' : '';
+      var suf = isDiff ? '**' : '';
+      lines.push('| ' + pre + label + suf + ' | ' + vals.join(' | ') + ' |');
+    });
+
+    return lines.join('\n');
+  }
+
+  copyBtn.addEventListener('click', async function() {
+    var md;
+
+    if (currentMode === 'variant' && currentVariantData) {
+      md = variantToMarkdown(currentVariantData);
+    } else if (currentMode === 'multi' && currentComponents) {
+      md = currentComponents.map(function(comp) {
+        return '## ' + comp.nodeName + '\n\n' + fieldsToMarkdownTable(comp.fields);
+      }).join('\n\n');
+    } else if (currentMode === 'single' && currentFields) {
+      md = fieldsToMarkdownTable(currentFields);
+    } else {
+      return;
+    }
 
     try {
       await navigator.clipboard.writeText(md);
       copyOkMsg.classList.add('show');
-      setTimeout(() => copyOkMsg.classList.remove('show'), 2000);
-    } catch {
-      // Fallback: prompt
-      const ta = document.createElement('textarea');
+      setTimeout(function() { copyOkMsg.classList.remove('show'); }, 2000);
+    } catch (e) {
+      var ta = document.createElement('textarea');
       ta.value = md;
       document.body.appendChild(ta);
       ta.select();
       document.execCommand('copy');
       document.body.removeChild(ta);
       copyOkMsg.classList.add('show');
-      setTimeout(() => copyOkMsg.classList.remove('show'), 2000);
+      setTimeout(function() { copyOkMsg.classList.remove('show'); }, 2000);
     }
   });
 </script>
