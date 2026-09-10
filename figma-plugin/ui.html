@@ -1044,7 +1044,6 @@
         break;
       case 'all-saved-docs':
         allSavedDocs = msg.payload || [];
-        console.log('[all-saved-docs] count=' + allSavedDocs.length + ' stateVisible=' + (state.style.display !== 'none'));
         // If currently on empty state, refresh the list
         if (state.style.display !== 'none') {
           renderSavedDocsList();

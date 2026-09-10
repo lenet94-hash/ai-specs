@@ -1105,7 +1105,6 @@ async function generateFactsForComponentInFrames(
   variantPropertiesUsed: Record<string, string[]>
 ): Promise<void> {
   // Find the component set node
-  console.log("[generateFacts] componentSetId=" + componentSetId);
   const csNode = await figma.getNodeByIdAsync(componentSetId) as ComponentSetNode | null;
   if (!csNode || csNode.type !== "COMPONENT_SET") {
     figma.ui.postMessage({ type: "error", message: "Component Set не знайдено." });
@@ -1400,14 +1399,11 @@ async function saveDocs(doc: SavedDoc): Promise<void> {
     await figma.clientStorage.setAsync(`doc-name:${doc.componentName}`, doc);
     // Update index
     const idx = await getDocIndex();
-    console.log("[saveDocs] name=" + doc.componentName + " indexBefore=" + JSON.stringify(idx));
     if (idx.indexOf(doc.componentName) === -1) {
       idx.push(doc.componentName);
       await saveDocIndex(idx);
     }
-    console.log("[saveDocs] indexAfter=" + JSON.stringify(idx));
-  } catch (e) {
-    console.log("[saveDocs] ERROR: " + String(e));
+  } catch {
     // Silently fail
   }
 }
@@ -1429,13 +1425,11 @@ async function deleteSavedDoc(componentName: string): Promise<void> {
 
 async function loadAllSavedDocs(): Promise<SavedDoc[]> {
   const idx = await getDocIndex();
-  console.log("[loadAllSavedDocs] index=" + JSON.stringify(idx));
   const docs: SavedDoc[] = [];
   for (const name of idx) {
     const doc = await loadSavedDoc(name);
     if (doc) docs.push(doc);
   }
-  console.log("[loadAllSavedDocs] found=" + docs.length);
   return docs;
 }
 
@@ -1465,7 +1459,6 @@ figma.ui.onmessage = async (msg: {
   if (msg.type === "check-saved-doc") {
     const name = msg.componentName || "";
     const saved = await loadSavedDoc(name);
-    console.log("[check-saved-doc] name=" + name + " found=" + (saved !== null));
     figma.ui.postMessage({
       type: "saved-doc-result",
       payload: saved,

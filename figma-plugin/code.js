@@ -908,7 +908,6 @@ async function scanFramesForComponents(frames) {
 /** When UI requests facts for a specific component from frame scan */
 async function generateFactsForComponentInFrames(componentSetId, usedVariantIds, frameContexts, variantPropertiesUsed) {
     // Find the component set node
-    console.log("[generateFacts] componentSetId=" + componentSetId);
     const csNode = await figma.getNodeByIdAsync(componentSetId);
     if (!csNode || csNode.type !== "COMPONENT_SET") {
         figma.ui.postMessage({ type: "error", message: "Component Set не знайдено." });
@@ -1174,15 +1173,12 @@ async function saveDocs(doc) {
         await figma.clientStorage.setAsync(`doc-name:${doc.componentName}`, doc);
         // Update index
         const idx = await getDocIndex();
-        console.log("[saveDocs] name=" + doc.componentName + " indexBefore=" + JSON.stringify(idx));
         if (idx.indexOf(doc.componentName) === -1) {
             idx.push(doc.componentName);
             await saveDocIndex(idx);
         }
-        console.log("[saveDocs] indexAfter=" + JSON.stringify(idx));
     }
-    catch (e) {
-        console.log("[saveDocs] ERROR: " + String(e));
+    catch (_a) {
         // Silently fail
     }
 }
@@ -1203,14 +1199,12 @@ async function deleteSavedDoc(componentName) {
 }
 async function loadAllSavedDocs() {
     const idx = await getDocIndex();
-    console.log("[loadAllSavedDocs] index=" + JSON.stringify(idx));
     const docs = [];
     for (const name of idx) {
         const doc = await loadSavedDoc(name);
         if (doc)
             docs.push(doc);
     }
-    console.log("[loadAllSavedDocs] found=" + docs.length);
     return docs;
 }
 // Handle messages from UI
@@ -1226,7 +1220,6 @@ figma.ui.onmessage = async (msg) => {
     if (msg.type === "check-saved-doc") {
         const name = msg.componentName || "";
         const saved = await loadSavedDoc(name);
-        console.log("[check-saved-doc] name=" + name + " found=" + (saved !== null));
         figma.ui.postMessage({
             type: "saved-doc-result",
             payload: saved,
