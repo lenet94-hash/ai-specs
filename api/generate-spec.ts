@@ -1,5 +1,6 @@
 export const config = {
   runtime: "edge",
+  maxDuration: 60,
 };
 
 const CORS_HEADERS = {
@@ -15,7 +16,6 @@ interface FactsBody {
   variants: {
     name: string;
     variantProperties: Record<string, string>;
-    fields: { label: string; value: string; source: string }[];
     textContent: string[];
     hasIcon: boolean;
   }[];
@@ -100,24 +100,29 @@ Rules:
 - Each bullet: under 35 words, specific and actionable.
 - No markdown, no extra keys, no explanation outside JSON.`;
 
-    const factsText = fb.facts
+    // Limit facts to keep prompt concise
+    const limitedFacts = fb.facts.slice(0, 40);
+    const factsText = limitedFacts
       .map((f) => `[${f.category}] ${f.fact}`)
       .join("\n");
 
-    const variantsText = fb.variants
+    // Only send variant summary (properties + content), skip full field specs
+    const limitedVariants = fb.variants.slice(0, 15);
+    const variantsText = limitedVariants
       .map((v) => {
         const props = Object.entries(v.variantProperties)
           .map(([k, val]) => `${k}=${val}`)
           .join(", ");
-        const texts = v.textContent.length > 0 ? `Text: "${v.textContent.join('", "')}"` : "No text";
+        const texts = v.textContent.length > 0 ? `Text: "${v.textContent.slice(0, 3).join('", "')}"` : "No text";
         const icon = v.hasIcon ? "Has icon" : "No icon";
         return `- ${v.name} (${props}) — ${texts}, ${icon}`;
       })
       .join("\n");
 
+    const limitedContexts = (fb.usageContexts || []).slice(0, 15);
     const usageText =
-      fb.usageContexts && fb.usageContexts.length > 0
-        ? fb.usageContexts
+      limitedContexts.length > 0
+        ? limitedContexts
             .map((ctx) => {
               const parents = ctx.parentChain.length > 0 ? ctx.parentChain.join(" > ") : "(root)";
               const siblings =
@@ -196,7 +201,7 @@ Generate the four documentation sections for this component.`;
         system: systemPrompt,
         messages: [{ role: "user", content: userMessage }],
       }),
-      signal: AbortSignal.timeout(25000),
+      signal: AbortSignal.timeout(55000),
     });
   } catch (err: unknown) {
     const isTimeout = err instanceof Error && err.name === "TimeoutError";
