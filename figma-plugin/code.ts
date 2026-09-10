@@ -1274,35 +1274,14 @@ async function analyzeSelection() {
     return;
   }
 
-  // Container scan (FRAME, SECTION, GROUP selected directly — not COMPONENT_SET)
-  if (isContainerForScan(node) && node.type !== "COMPONENT") {
+  // Frame/Section/Group selected → frame scan mode (find components inside)
+  if (node.type === "FRAME" || node.type === "SECTION" || node.type === "GROUP") {
     try {
-      const components = findTopLevelComponents(
-        node as FrameNode | SectionNode | GroupNode | ComponentSetNode
-      );
-      if (components.length === 0) {
-        figma.ui.postMessage({ type: "no-components-in-frame" });
-        return;
-      }
-      const specs = await Promise.all(
-        components.map(async (comp) => ({
-          nodeName: comp.name,
-          nodeType: comp.type,
-          fields: await buildSpec(comp),
-        }))
-      );
-      figma.ui.postMessage({
-        type: "multi-spec-data",
-        payload: {
-          containerName: node.name,
-          containerType: node.type,
-          components: specs,
-        },
-      });
+      await scanFramesForComponents([node as FrameNode | SectionNode | GroupNode]);
     } catch {
       figma.ui.postMessage({
         type: "error",
-        message: "Не вдалося проаналізувати вміст фрейму.",
+        message: "Не вдалося просканувати фрейм.",
       });
     }
     return;
