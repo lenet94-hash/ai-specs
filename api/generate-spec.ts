@@ -19,6 +19,12 @@ interface FactsBody {
     textContent: string[];
     hasIcon: boolean;
   }[];
+  usageContexts?: {
+    instanceName: string;
+    parentChain: string[];
+    siblingComponents: string[];
+    pageName: string;
+  }[];
 }
 
 interface LegacyBody {
@@ -60,16 +66,22 @@ export default async function handler(req: Request): Promise<Response> {
       return json({ error: "componentName and facts[] are required for facts mode" }, 400);
     }
 
-    systemPrompt = `You are a design system documentation writer. You generate component specifications based STRICTLY on facts extracted from a Figma file.
+    systemPrompt = `You are a senior design system documentation writer. You generate component specifications from facts extracted from a Figma file.
 
-CRITICAL RULES:
-- ONLY use information from the provided facts and variant data. Do NOT add general UX knowledge or assumptions.
-- Every bullet point must be traceable to one or more provided facts.
-- If a section cannot be filled from the available facts, include fewer bullets rather than inventing information.
-- Write in clear, concise English. Each bullet should be actionable and specific.
-- Reference specific values, token names, and variant properties from the facts.
+You work with TWO types of information:
+1. **Facts** — directly extracted from the Figma file (variant properties, values, tokens, usage contexts, sibling components). These are ground truth.
+2. **Interpretations** — your professional conclusions derived from combining multiple facts. For example: if a pill-shaped button only appears inside filter containers, you can conclude "Pill-style buttons are used exclusively for filter actions."
 
-Respond ONLY with a valid JSON object matching exactly this shape:
+RULES:
+- Every bullet MUST be grounded in one or more provided facts. No generic UX advice.
+- You MAY interpret and synthesize facts into higher-level design guidelines. This is encouraged.
+- When you interpret, be specific — reference the actual values, contexts, and token names.
+- Use usage context data (where instances appear, what they sit alongside) to derive WHEN and WHERE to use the component.
+- Use variant comparison data to derive HOW the component changes across states and sizes.
+- If usage data shows exclusive placement (e.g., only in "Filters"), state that clearly.
+- If sibling analysis shows common pairings (e.g., always next to a search input), mention it.
+
+Respond ONLY with a valid JSON object:
 {
   "usageGuidelines": ["...", "..."],
   "contentGuidelines": ["...", "..."],
@@ -78,16 +90,15 @@ Respond ONLY with a valid JSON object matching exactly this shape:
 }
 
 Section guidance:
-- usageGuidelines: When and how to use this component, based on its variant properties, sizes, and types found in the file.
-- contentGuidelines: Text content patterns, icon usage, and labeling rules observed in the variants.
-- behavior: State changes, visual differences between states (colors, opacity, borders), and interactive patterns found in the data.
-- edgeCases: Edge cases derivable from the data — e.g. missing tokens, mixed values, variants without icons, extreme sizes.
+- usageGuidelines: WHEN and WHERE to use this component. Derive from usage contexts (parent frames), variant properties (types/sizes), and placement patterns. Be specific: "Use the Pill variant exclusively in filter bars" not "Use appropriate variant."
+- contentGuidelines: Text and icon patterns. What content appears, what's optional, labeling conventions observed in variants.
+- behavior: HOW the component changes across states. Specific visual changes (color shifts, opacity, border additions), referencing actual values and tokens.
+- edgeCases: Potential issues derived from the data — missing tokens, unusual sizing, variants lacking icons, contexts where the component might not fit.
 
 Rules:
-- Each array should have 2-5 bullet-point strings.
-- No markdown, no extra keys, no explanation outside the JSON.
-- Keep each point under 30 words.
-- Prefer specificity ("Disabled state reduces opacity to 0.5") over vagueness ("Consider disabled states").`;
+- Each array: 2-5 bullets.
+- Each bullet: under 35 words, specific and actionable.
+- No markdown, no extra keys, no explanation outside JSON.`;
 
     const factsText = fb.facts
       .map((f) => `[${f.category}] ${f.fact}`)
@@ -104,6 +115,20 @@ Rules:
       })
       .join("\n");
 
+    const usageText =
+      fb.usageContexts && fb.usageContexts.length > 0
+        ? fb.usageContexts
+            .map((ctx) => {
+              const parents = ctx.parentChain.length > 0 ? ctx.parentChain.join(" > ") : "(root)";
+              const siblings =
+                ctx.siblingComponents.length > 0
+                  ? `Siblings: ${ctx.siblingComponents.join(", ")}`
+                  : "No siblings";
+              return `- "${ctx.instanceName}" in ${parents} | ${siblings}`;
+            })
+            .join("\n")
+        : "(no instances found on this page)";
+
     userMessage = `Component: ${fb.componentName}
 Variant count: ${fb.variants.length}
 
@@ -113,7 +138,10 @@ ${factsText}
 === VARIANTS ===
 ${variantsText}
 
-Generate the four documentation sections based ONLY on these facts.`;
+=== USAGE CONTEXTS (where instances live on the page) ===
+${usageText}
+
+Generate the four documentation sections. Ground every bullet in the facts and usage data above. You may interpret and synthesize — but do not invent facts not supported by the data.`;
   } else {
     // Legacy mode — backward compatible
     const lb = body as LegacyBody;

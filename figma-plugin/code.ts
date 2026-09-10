@@ -702,26 +702,226 @@ function categorizeField(label: string): ComponentFact["category"] {
   return "structure";
 }
 
+// ─── Usage context: scan page for instances ─────────────────────────────────
+
+interface UsageContext {
+  instanceName: string;
+  parentChain: string[];  // from immediate parent up to page
+  siblingComponents: string[];  // names of sibling component instances
+  pageName: string;
+}
+
+/** Walk up the tree collecting frame/section/group names */
+function getParentChain(node: SceneNode): string[] {
+  const chain: string[] = [];
+  let current: BaseNode | null = node.parent;
+  while (current && current.type !== "PAGE" && current.type !== "DOCUMENT") {
+    if ("name" in current) {
+      chain.push((current as SceneNode).name);
+    }
+    current = current.parent;
+  }
+  return chain;
+}
+
+/** Get names of sibling instances/components (immediate siblings only) */
+function getSiblingComponentNames(node: SceneNode): string[] {
+  const parent = node.parent;
+  if (!parent || !("children" in parent)) return [];
+  const names: string[] = [];
+  for (const child of (parent as ChildrenMixin).children) {
+    const c = child as SceneNode;
+    if (c.id === node.id) continue;
+    if (c.type === "INSTANCE" || c.type === "COMPONENT") {
+      names.push(c.name);
+    } else if (c.type === "TEXT") {
+      names.push(`[Text: "${(c as TextNode).characters.slice(0, 40)}"]`);
+    }
+  }
+  return names;
+}
+
+/** Find all instances of a component set on the current page */
+async function scanUsageOnPage(componentSetId: string): Promise<UsageContext[]> {
+  const allInstances = figma.currentPage.findAll(
+    (n) => n.type === "INSTANCE"
+  ) as InstanceNode[];
+
+  const contexts: UsageContext[] = [];
+  const pageName = figma.currentPage.name;
+
+  for (const inst of allInstances) {
+    let mainComp: ComponentNode | null = null;
+    try {
+      mainComp = await inst.getMainComponentAsync();
+    } catch {
+      continue;
+    }
+    if (!mainComp) continue;
+
+    const parentSet = mainComp.parent;
+    if (!parentSet || parentSet.type !== "COMPONENT_SET") continue;
+    if (parentSet.id !== componentSetId) continue;
+
+    contexts.push({
+      instanceName: inst.name,
+      parentChain: getParentChain(inst),
+      siblingComponents: getSiblingComponentNames(inst),
+      pageName,
+    });
+  }
+
+  return contexts;
+}
+
+// ─── Semantic interpretation helpers ─────────────────────────────────────────
+
+function generateSemanticFacts(
+  variants: VariantInfo[],
+  usageContexts: UsageContext[]
+): ComponentFact[] {
+  const facts: ComponentFact[] = [];
+
+  // ── Border radius interpretation ──
+  for (const v of variants) {
+    for (const f of v.fields) {
+      if (f.label === "Border Radius" || f.label.startsWith("Border Radius")) {
+        const val = parseInt(f.value, 10);
+        if (!isNaN(val)) {
+          const h = parseInt(
+            (v.fields.find((ff) => ff.label === "Height") || { value: "0" }).value,
+            10
+          );
+          if (val > 0 && h > 0 && val >= h / 2) {
+            facts.push({
+              fact: `"${v.name}" uses pill-style (fully rounded) border radius (${f.value}, height ${h}px)`,
+              category: "visual",
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // ── Opacity interpretation ──
+  for (const v of variants) {
+    for (const f of v.fields) {
+      if (f.label === "Fill Color" && f.value.startsWith("rgba")) {
+        const opacityMatch = f.value.match(/,\s*([\d.]+)\)$/);
+        if (opacityMatch) {
+          const opacity = parseFloat(opacityMatch[1]);
+          if (opacity < 1 && opacity > 0) {
+            facts.push({
+              fact: `"${v.name}" uses reduced opacity (${Math.round(opacity * 100)}%) on fill — may indicate disabled or muted state`,
+              category: "states",
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // ── Size classification ──
+  const heights = new Map<string, number>();
+  for (const v of variants) {
+    const hf = v.fields.find((f) => f.label === "Height");
+    if (hf) {
+      const h = parseInt(hf.value, 10);
+      if (!isNaN(h)) heights.set(v.name, h);
+    }
+  }
+  if (heights.size > 1) {
+    const sorted = [...heights.entries()].sort((a, b) => a[1] - b[1]);
+    const sizeLabels = sorted.map((e) => `${e[0]}=${e[1]}px`);
+    facts.push({
+      fact: `Size scale from smallest to largest: ${sizeLabels.join(", ")}`,
+      category: "structure",
+    });
+  }
+
+  // ── Usage context facts ──
+  if (usageContexts.length > 0) {
+    facts.push({
+      fact: `Found ${usageContexts.length} instance(s) of this component on page "${usageContexts[0].pageName}"`,
+      category: "structure",
+    });
+
+    // Group by parent context (first meaningful parent name)
+    const contextGroups = new Map<string, number>();
+    for (const ctx of usageContexts) {
+      const parentName = ctx.parentChain[0] || "(root)";
+      contextGroups.set(parentName, (contextGroups.get(parentName) || 0) + 1);
+    }
+    if (contextGroups.size > 0) {
+      const grouped = [...contextGroups.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map((e) => `"${e[0]}" (${e[1]}x)`);
+      facts.push({
+        fact: `Used in these contexts: ${grouped.join(", ")}`,
+        category: "structure",
+      });
+    }
+
+    // Exclusive usage detection
+    if (contextGroups.size === 1) {
+      const onlyContext = [...contextGroups.keys()][0];
+      facts.push({
+        fact: `All instances appear exclusively within "${onlyContext}" — this component may be specific to that context`,
+        category: "structure",
+      });
+    }
+
+    // Sibling analysis — what components appear alongside
+    const siblingCounts = new Map<string, number>();
+    for (const ctx of usageContexts) {
+      for (const sib of ctx.siblingComponents) {
+        siblingCounts.set(sib, (siblingCounts.get(sib) || 0) + 1);
+      }
+    }
+    const commonSiblings = [...siblingCounts.entries()]
+      .filter((e) => e[1] >= Math.ceil(usageContexts.length * 0.5))
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5);
+    if (commonSiblings.length > 0) {
+      facts.push({
+        fact: `Frequently appears alongside: ${commonSiblings.map((e) => `"${e[0]}" (${e[1]}/${usageContexts.length} instances)`).join(", ")}`,
+        category: "structure",
+      });
+    }
+  } else {
+    facts.push({
+      fact: "No instances of this component found on the current page",
+      category: "structure",
+    });
+  }
+
+  return facts;
+}
+
 /** Main entry: collect facts from multiple selected nodes */
 async function collectFactsFromSelection(nodes: readonly SceneNode[]): Promise<{
   componentName: string;
   variants: VariantInfo[];
   facts: ComponentFact[];
+  usageContexts: UsageContext[];
 }> {
   const variants = await Promise.all(nodes.map((n) => buildVariantInfo(n)));
 
-  // Try to derive a component set name
+  // Try to derive a component set name and component set ID
   let componentName = "Component";
-  // Check if nodes belong to the same component set
+  let componentSetId: string | null = null;
+
   for (const node of nodes) {
     if (node.type === "COMPONENT" && node.parent?.type === "COMPONENT_SET") {
       componentName = (node.parent as ComponentSetNode).name;
+      componentSetId = node.parent.id;
       break;
     }
     if (node.type === "INSTANCE") {
       const main = await (node as InstanceNode).getMainComponentAsync();
       if (main?.parent?.type === "COMPONENT_SET") {
         componentName = (main.parent as ComponentSetNode).name;
+        componentSetId = main.parent.id;
         break;
       }
     }
@@ -733,9 +933,25 @@ async function collectFactsFromSelection(nodes: readonly SceneNode[]): Promise<{
     }
   }
 
-  const facts = generateFacts(variants, componentName);
+  // Collect raw comparison facts
+  const rawFacts = generateFacts(variants, componentName);
 
-  return { componentName, variants, facts };
+  // Scan usage across page
+  let usageContexts: UsageContext[] = [];
+  if (componentSetId) {
+    try {
+      usageContexts = await scanUsageOnPage(componentSetId);
+    } catch {
+      // If scan fails, continue without usage context
+    }
+  }
+
+  // Generate semantic interpretation facts
+  const semanticFacts = generateSemanticFacts(variants, usageContexts);
+
+  const facts = [...rawFacts, ...semanticFacts];
+
+  return { componentName, variants, facts, usageContexts };
 }
 
 function commonPrefix(strings: string[]): string {
@@ -783,6 +999,7 @@ async function analyzeSelection() {
             hasIcon: v.hasIcon,
           })),
           facts: result.facts,
+          usageContexts: result.usageContexts,
         },
       });
     } catch {
