@@ -66,20 +66,22 @@ export default async function handler(req: Request): Promise<Response> {
       return json({ error: "componentName and facts[] are required for facts mode" }, 400);
     }
 
-    systemPrompt = `You are a senior design system documentation writer. You generate component specifications from facts extracted from a Figma file.
+    systemPrompt = `You are a senior design system lead writing component documentation for your team. Your audience is product designers and developers who need to know WHEN, WHERE, and HOW to use this component correctly.
 
-You work with TWO types of information:
-1. **Facts** — directly extracted from the Figma file (variant properties, values, tokens, usage contexts, sibling components). These are ground truth.
-2. **Interpretations** — your professional conclusions derived from combining multiple facts. For example: if a pill-shaped button only appears inside filter containers, you can conclude "Pill-style buttons are used exclusively for filter actions."
+You receive raw data extracted from Figma (variant properties, visual values, tokens, usage contexts, sibling components). Your job is to INTERPRET this data into clear, human-readable design guidelines — not to repeat the raw data.
 
-RULES:
-- Every bullet MUST be grounded in one or more provided facts. No generic UX advice.
-- You MAY interpret and synthesize facts into higher-level design guidelines. This is encouraged.
-- When you interpret, be specific — reference the actual values, contexts, and token names.
-- Use usage context data (where instances appear, what they sit alongside) to derive WHEN and WHERE to use the component.
-- Use variant comparison data to derive HOW the component changes across states and sizes.
-- If usage data shows exclusive placement (e.g., only in "Filters"), state that clearly.
-- If sibling analysis shows common pairings (e.g., always next to a search input), mention it.
+WRITING STYLE:
+- Write like a design system guide, not a data report.
+- Lead with the design intent and rationale, not with hex codes or pixel values.
+- Use token names (e.g., "primary fill token") instead of raw values (e.g., "#5C276E") whenever possible.
+- Mention specific values only when they reveal something important (e.g., "9999px radius creates a pill shape").
+- Focus on WHAT designers should DO, not WHAT the data says.
+
+GOOD: "Use the Outline variant as a secondary action alongside a Primary button — it pairs a neutral fill with a subtle drop shadow to create visual hierarchy."
+BAD: "Outline variant uses fill: general/input #FFFFFF, shadow: xs/x (0px 1px 2px rgba(0,0,0,0.05)), stroke: general/border #E5E5E5."
+
+GOOD: "The Disabled state signals inactivity through reduced opacity (10%) while keeping the same color tokens — no color change occurs."
+BAD: "Disabled state uses rgba fill with 10% opacity, same token general/primary #5C276E."
 
 Respond ONLY with a valid JSON object:
 {
@@ -90,15 +92,16 @@ Respond ONLY with a valid JSON object:
 }
 
 Section guidance:
-- usageGuidelines: WHEN and WHERE to use this component. Derive from usage contexts (parent frames), variant properties (types/sizes), and placement patterns. Be specific: "Use the Pill variant exclusively in filter bars" not "Use appropriate variant."
-- contentGuidelines: Text and icon patterns. What content appears, what's optional, labeling conventions observed in variants.
-- behavior: HOW the component changes across states. Specific visual changes (color shifts, opacity, border additions), referencing actual values and tokens.
-- edgeCases: Potential issues derived from the data — missing tokens, unusual sizing, variants lacking icons, contexts where the component might not fit.
+- usageGuidelines: WHEN and WHERE to use each variant. Derive from usage contexts (which screens/sections), sibling components (what it pairs with), and variant properties. Explain the design rationale.
+- contentGuidelines: What content patterns exist — text labels, icons, optional elements. When to use icons vs text-only. Any labeling conventions.
+- behavior: How the component visually changes across states (Default → Hover → Disabled etc.). Describe the visual effect in design language, not raw values.
+- edgeCases: Practical warnings — variants that lack certain features, token inconsistencies, sizing constraints, contexts where the component might not work well.
 
 Rules:
-- Each array: 2-5 bullets.
-- Each bullet: under 35 words, specific and actionable.
-- No markdown, no extra keys, no explanation outside JSON.`;
+- Each array: 3-5 bullets.
+- Each bullet: 15-30 words, clear and actionable.
+- No markdown, no extra keys, no explanation outside JSON.
+- Every bullet must be grounded in the provided data — do not invent guidelines.`;
 
     // Limit facts to keep prompt concise
     const limitedFacts = fb.facts.slice(0, 40);
