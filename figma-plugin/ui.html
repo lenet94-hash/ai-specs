@@ -32,37 +32,16 @@
       min-height: 100vh;
     }
 
-    /* ── Header ── */
-    header {
+    /* ── Layout: scrollable body + sticky footer ── */
+    body {
       display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 12px 16px 10px;
-      border-bottom: 1px solid var(--border);
+      flex-direction: column;
     }
 
-    .logo-mark {
-      width: 22px;
-      height: 22px;
-      border-radius: 5px;
-      background: linear-gradient(135deg, var(--accent), var(--accent-2));
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 11px;
-      font-weight: 700;
-      color: #fff;
-      letter-spacing: -0.5px;
-      flex-shrink: 0;
-    }
-
-    .plugin-name {
-      font-size: 13px;
-      font-weight: 600;
-      background: linear-gradient(90deg, var(--accent), var(--accent-2));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
+    #main-content {
+      flex: 1;
+      overflow-y: auto;
+      min-height: 0;
     }
 
     /* ── Node info ── */
@@ -207,14 +186,29 @@
       font-family: "SF Mono", monospace;
     }
 
-    /* ── Footer / Actions ── */
+    /* ── Footer / Actions — sticky at bottom ── */
     footer {
       padding: 10px 16px;
       border-top: 1px solid var(--border);
       display: flex;
       align-items: center;
       gap: 8px;
+      background: var(--bg);
+      flex-shrink: 0;
     }
+
+    /* ── Back button ── */
+    #back-btn {
+      background: none;
+      color: var(--text-muted);
+      padding: 4px 8px;
+      font-size: 11px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    #back-btn:hover { color: var(--text); border-color: var(--text-muted); }
 
     button {
       cursor: pointer;
@@ -476,12 +470,10 @@
 </head>
 <body>
 
-<header>
-  <div class="logo-mark">AI</div>
-  <span class="plugin-name">AI Specs</span>
-</header>
+<div id="main-content">
 
 <div id="node-info" style="display:none;">
+  <button id="back-btn" style="display:none;" title="Назад">← Назад</button>
   <span class="node-name" id="node-name-text"></span>
   <span class="node-type"  id="node-type-text"></span>
 </div>
@@ -535,6 +527,8 @@
 
 <div id="ai-doc-wrap" style="display:none;"></div>
 
+</div><!-- end #main-content -->
+
 <footer>
   <button id="gen-btn" disabled>✦ Generate Doc</button>
   <span style="flex:1"></span>
@@ -577,6 +571,7 @@
   const factsSummary = document.getElementById('facts-summary');
   const factsList  = document.getElementById('facts-list');
   const genBtn     = document.getElementById('gen-btn');
+  const backBtn    = document.getElementById('back-btn');
 
   function hideAll() {
     state.style.display       = 'none';
@@ -588,6 +583,7 @@
     aiDocWrap.style.display   = 'none';
     nodeInfo.style.display    = 'none';
     errorBox.style.display    = 'none';
+    backBtn.style.display     = 'none';
     currentMode = null;
     currentFields = null;
     currentComponents = null;
@@ -813,16 +809,21 @@
   // ─── Render facts view (multi-selection) ─────────────────────────────────
 
   function renderFacts(data) {
+    var savedScan = currentScanData;
     hideAll();
+    currentScanData = savedScan; // preserve scan data for back navigation
     currentMode = 'facts';
     currentFactsData = data;
 
     nodeNameEl.textContent = data.componentName;
-    nodeTypeEl.textContent = data.variantCount + ' variants selected';
+    nodeTypeEl.textContent = data.variantCount + ' variants';
     nodeInfo.style.display  = 'flex';
     factsWrap.style.display = 'block';
     genBtn.disabled         = false;
     copyBtn.disabled        = true;
+
+    // Show back button if we came from scan view
+    backBtn.style.display = currentScanData ? 'block' : 'none';
 
     var truncNote = data.variantCount > 10
       ? '<br><span style="color:var(--accent-2)">⚡ Для генерації буде використано перші 10 варіантів</span>'
@@ -889,6 +890,14 @@
         break;
     }
   };
+
+  // ─── Back button ─────────────────────────────────────────────────────────
+
+  backBtn.addEventListener('click', function() {
+    if (currentScanData) {
+      renderFrameScan(currentScanData);
+    }
+  });
 
   // ─── Copy as Markdown ────────────────────────────────────────────────────
 
