@@ -466,6 +466,41 @@
       font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px;
       color: var(--text-muted); margin-right: 4px;
     }
+
+    /* ── Saved doc banner ── */
+    #saved-doc-banner {
+      display: none;
+      margin: 8px 16px;
+      padding: 10px 12px;
+      border-radius: 6px;
+      background: rgba(47, 143, 222, 0.08);
+      border: 1px solid rgba(47, 143, 222, 0.2);
+    }
+    .saved-doc-title {
+      font-size: 11px; font-weight: 600; color: var(--accent);
+      margin-bottom: 4px;
+    }
+    .saved-doc-meta {
+      font-size: 10px; color: var(--text-muted); margin-bottom: 8px;
+    }
+    .saved-doc-actions {
+      display: flex; gap: 6px;
+    }
+    .saved-doc-actions button {
+      font-size: 10px; padding: 4px 10px; border-radius: 4px;
+    }
+    #saved-show-btn {
+      background: rgba(47, 143, 222, 0.15); color: var(--accent);
+      border: 1px solid rgba(47, 143, 222, 0.3);
+    }
+    #saved-add-btn {
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #fff;
+    }
+    #saved-reset-btn {
+      background: none; color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
   </style>
 </head>
 <body>
@@ -520,6 +555,16 @@
   <ul class="scan-list" id="scan-list"></ul>
 </div>
 
+<div id="saved-doc-banner">
+  <div class="saved-doc-title">Збережена документація</div>
+  <div class="saved-doc-meta" id="saved-doc-meta"></div>
+  <div class="saved-doc-actions">
+    <button id="saved-show-btn">Показати</button>
+    <button id="saved-add-btn">+ Додати контекст</button>
+    <button id="saved-reset-btn">Скинути</button>
+  </div>
+</div>
+
 <div id="facts-wrap">
   <div class="facts-summary" id="facts-summary"></div>
   <ul class="facts-list" id="facts-list"></ul>
@@ -572,6 +617,12 @@
   const factsList  = document.getElementById('facts-list');
   const genBtn     = document.getElementById('gen-btn');
   const backBtn    = document.getElementById('back-btn');
+  const savedBanner = document.getElementById('saved-doc-banner');
+  const savedMeta  = document.getElementById('saved-doc-meta');
+  const savedShowBtn = document.getElementById('saved-show-btn');
+  const savedAddBtn = document.getElementById('saved-add-btn');
+  const savedResetBtn = document.getElementById('saved-reset-btn');
+  var pendingSavedDoc = null; // holds saved doc while viewing facts
 
   function hideAll() {
     state.style.display       = 'none';
@@ -835,6 +886,16 @@
         + '<span class="fact-category">' + f.category + '</span>'
         + f.fact + '</li>';
     }).join('');
+
+    // Check for saved doc
+    savedBanner.style.display = 'none';
+    pendingSavedDoc = null;
+    if (data.componentSetId) {
+      parent.postMessage({ pluginMessage: {
+        type: 'check-saved-doc',
+        componentSetId: data.componentSetId,
+      }}, '*');
+    }
   }
 
   // ─── Show state messages ─────────────────────────────────────────────────
@@ -879,6 +940,17 @@
       case 'frame-scan-data':
         renderFrameScan(msg.payload);
         break;
+      case 'saved-doc-result':
+        if (msg.payload && currentMode === 'facts') {
+          pendingSavedDoc = msg.payload;
+          var frameList = msg.payload.frameNames.join(', ');
+          var date = new Date(msg.payload.generatedAt);
+          var timeStr = date.toLocaleString('uk-UA', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' });
+          savedMeta.textContent = 'Контексти: ' + frameList + ' | ' + timeStr;
+          savedBanner.style.display = 'block';
+          genBtn.textContent = '✦ Генерувати заново';
+        }
+        break;
       case 'no-selection':
         showState('↖', 'Виберіть елемент', 'Клацніть на будь-який шар у Figma');
         break;
@@ -897,6 +969,35 @@
     if (currentScanData) {
       renderFrameScan(currentScanData);
     }
+  });
+
+  // ─── Saved doc buttons ──────────────────────────────────────────────────
+
+  savedShowBtn.addEventListener('click', function() {
+    if (pendingSavedDoc && pendingSavedDoc.doc) {
+      currentAiDoc = pendingSavedDoc.doc;
+      renderAiDoc(pendingSavedDoc.doc);
+      copyBtn.disabled = false;
+    }
+  });
+
+  savedAddBtn.addEventListener('click', function() {
+    // "Add context" — generate with previous doc as context
+    if (!pendingSavedDoc || !currentFactsData) return;
+    genBtn.click(); // triggers generation with previousDoc
+  });
+
+  savedResetBtn.addEventListener('click', function() {
+    if (!currentFactsData || !currentFactsData.componentSetId) return;
+    parent.postMessage({ pluginMessage: {
+      type: 'delete-doc',
+      componentSetId: currentFactsData.componentSetId,
+    }}, '*');
+    pendingSavedDoc = null;
+    savedBanner.style.display = 'none';
+    genBtn.textContent = '✦ Generate Doc';
+    aiDocWrap.style.display = 'none';
+    currentAiDoc = null;
   });
 
   // ─── Copy as Markdown ────────────────────────────────────────────────────
@@ -1021,6 +1122,12 @@
           }),
           usageContexts: limitedContexts,
         };
+
+        // If there's a saved doc, include it for incremental generation
+        if (pendingSavedDoc && pendingSavedDoc.doc) {
+          body.previousDoc = pendingSavedDoc.doc;
+          body.previousFrameNames = pendingSavedDoc.frameNames;
+        }
       } else {
         // Legacy single/variant mode
         var componentName = nodeNameEl.textContent;
@@ -1063,6 +1170,35 @@
       currentAiDoc = data;
       renderAiDoc(data);
       copyBtn.disabled = false;
+
+      // Save doc to persistent storage
+      if (currentMode === 'facts' && currentFactsData && currentFactsData.componentSetId) {
+        var prevFrames = (pendingSavedDoc && pendingSavedDoc.frameNames) ? pendingSavedDoc.frameNames : [];
+        // Derive current frame names from scan data or usage contexts
+        var currentFrameNames = [];
+        if (currentScanData && currentScanData.frameNames) {
+          currentFrameNames = currentScanData.frameNames;
+        }
+        // Merge frame names (deduplicate)
+        var allFrameNames = prevFrames.slice();
+        currentFrameNames.forEach(function(fn) {
+          if (allFrameNames.indexOf(fn) === -1) allFrameNames.push(fn);
+        });
+
+        parent.postMessage({ pluginMessage: {
+          type: 'save-doc',
+          savedDoc: {
+            componentSetId: currentFactsData.componentSetId,
+            componentName: currentFactsData.componentName,
+            doc: data,
+            frameNames: allFrameNames,
+            generatedAt: Date.now(),
+          },
+        }}, '*');
+
+        pendingSavedDoc = null;
+        savedBanner.style.display = 'none';
+      }
     } catch (e) {
       aiDocWrap.innerHTML = '<div class="ai-doc-error">⚠ ' + (e.message || 'Помилка генерації') + '</div>';
       aiDocWrap.style.display = 'block';

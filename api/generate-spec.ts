@@ -25,6 +25,13 @@ interface FactsBody {
     siblingComponents: string[];
     pageName: string;
   }[];
+  previousDoc?: {
+    usageGuidelines: string[];
+    contentGuidelines: string[];
+    behavior: string[];
+    edgeCases: string[];
+  };
+  previousFrameNames?: string[];
 }
 
 interface LegacyBody {
@@ -137,6 +144,27 @@ Rules:
             .join("\n")
         : "(no instances found on this page)";
 
+    let previousDocText = "";
+    if (fb.previousDoc) {
+      const prevFrames = fb.previousFrameNames?.join(", ") || "unknown frames";
+      previousDocText = `
+
+=== PREVIOUS DOCUMENTATION (generated from: ${prevFrames}) ===
+Usage Guidelines:
+${fb.previousDoc.usageGuidelines.map((b) => `- ${b}`).join("\n")}
+
+Content Guidelines:
+${fb.previousDoc.contentGuidelines.map((b) => `- ${b}`).join("\n")}
+
+Behavior:
+${fb.previousDoc.behavior.map((b) => `- ${b}`).join("\n")}
+
+Edge Cases:
+${fb.previousDoc.edgeCases.map((b) => `- ${b}`).join("\n")}
+
+IMPORTANT: You are UPDATING this documentation with NEW context. Keep valid existing guidelines, modify those that need updating based on new data, and add new guidelines from the new context. The result should be a unified document covering ALL contexts.`;
+    }
+
     userMessage = `Component: ${fb.componentName}
 Variant count: ${fb.variants.length}
 
@@ -147,7 +175,7 @@ ${factsText}
 ${variantsText}
 
 === USAGE CONTEXTS (where instances live on the page) ===
-${usageText}
+${usageText}${previousDocText}
 
 Generate the four documentation sections. Ground every bullet in the facts and usage data above. You may interpret and synthesize — but do not invent facts not supported by the data.`;
   } else {

@@ -1169,6 +1169,7 @@ async function generateFactsForComponentInFrames(
   figma.ui.postMessage({
     type: "component-facts-data",
     payload: {
+      componentSetId: csNode.id,
       componentName: csNode.name,
       variantCount: variants.length,
       variants: variants.map((v) => ({
@@ -1354,8 +1355,50 @@ async function analyzeSelection() {
   }
 }
 
+// ─── Persistent storage for generated docs ──────────────────────────────────
+
+interface SavedDoc {
+  componentSetId: string;
+  componentName: string;
+  doc: { usageGuidelines: string[]; contentGuidelines: string[]; behavior: string[]; edgeCases: string[] };
+  frameNames: string[];
+  generatedAt: number;
+}
+
+async function loadSavedDoc(componentSetId: string): Promise<SavedDoc | null> {
+  try {
+    const data = await figma.clientStorage.getAsync(`doc:${componentSetId}`);
+    return data || null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveDocs(doc: SavedDoc): Promise<void> {
+  try {
+    await figma.clientStorage.setAsync(`doc:${doc.componentSetId}`, doc);
+  } catch {
+    // Silently fail
+  }
+}
+
+async function deleteSavedDoc(componentSetId: string): Promise<void> {
+  try {
+    await figma.clientStorage.deleteAsync(`doc:${componentSetId}`);
+  } catch {
+    // Silently fail
+  }
+}
+
 // Handle messages from UI
-figma.ui.onmessage = async (msg: { type: string; componentSetId?: string; usedVariantIds?: string[]; frameContexts?: FrameComponentGroup["frameContexts"]; variantPropertiesUsed?: Record<string, string[]> }) => {
+figma.ui.onmessage = async (msg: {
+  type: string;
+  componentSetId?: string;
+  usedVariantIds?: string[];
+  frameContexts?: FrameComponentGroup["frameContexts"];
+  variantPropertiesUsed?: Record<string, string[]>;
+  savedDoc?: SavedDoc;
+}) => {
   if (msg.type === "generate-component-from-scan") {
     try {
       await generateFactsForComponentInFrames(
@@ -1367,6 +1410,24 @@ figma.ui.onmessage = async (msg: { type: string; componentSetId?: string; usedVa
     } catch {
       figma.ui.postMessage({ type: "error", message: "Не вдалося згенерувати факти для компонента." });
     }
+  }
+
+  if (msg.type === "check-saved-doc") {
+    const saved = await loadSavedDoc(msg.componentSetId!);
+    figma.ui.postMessage({
+      type: "saved-doc-result",
+      payload: saved,
+    });
+  }
+
+  if (msg.type === "save-doc") {
+    if (msg.savedDoc) {
+      await saveDocs(msg.savedDoc);
+    }
+  }
+
+  if (msg.type === "delete-doc") {
+    await deleteSavedDoc(msg.componentSetId!);
   }
 };
 

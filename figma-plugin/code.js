@@ -967,6 +967,7 @@ async function generateFactsForComponentInFrames(componentSetId, usedVariantIds,
     figma.ui.postMessage({
         type: "component-facts-data",
         payload: {
+            componentSetId: csNode.id,
             componentName: csNode.name,
             variantCount: variants.length,
             variants: variants.map((v) => ({
@@ -1139,6 +1140,31 @@ async function analyzeSelection() {
         });
     }
 }
+async function loadSavedDoc(componentSetId) {
+    try {
+        const data = await figma.clientStorage.getAsync(`doc:${componentSetId}`);
+        return data || null;
+    }
+    catch (_a) {
+        return null;
+    }
+}
+async function saveDocs(doc) {
+    try {
+        await figma.clientStorage.setAsync(`doc:${doc.componentSetId}`, doc);
+    }
+    catch (_a) {
+        // Silently fail
+    }
+}
+async function deleteSavedDoc(componentSetId) {
+    try {
+        await figma.clientStorage.deleteAsync(`doc:${componentSetId}`);
+    }
+    catch (_a) {
+        // Silently fail
+    }
+}
 // Handle messages from UI
 figma.ui.onmessage = async (msg) => {
     if (msg.type === "generate-component-from-scan") {
@@ -1148,6 +1174,21 @@ figma.ui.onmessage = async (msg) => {
         catch (_a) {
             figma.ui.postMessage({ type: "error", message: "Не вдалося згенерувати факти для компонента." });
         }
+    }
+    if (msg.type === "check-saved-doc") {
+        const saved = await loadSavedDoc(msg.componentSetId);
+        figma.ui.postMessage({
+            type: "saved-doc-result",
+            payload: saved,
+        });
+    }
+    if (msg.type === "save-doc") {
+        if (msg.savedDoc) {
+            await saveDocs(msg.savedDoc);
+        }
+    }
+    if (msg.type === "delete-doc") {
+        await deleteSavedDoc(msg.componentSetId);
     }
 };
 // Run once immediately on open
