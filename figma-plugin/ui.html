@@ -726,7 +726,10 @@
     genBtn.disabled         = false;
     copyBtn.disabled        = true;
 
-    factsSummary.innerHTML = 'Зібрано <strong>' + data.facts.length + '</strong> фактів з <strong>' + data.variantCount + '</strong> виділених елементів';
+    var truncNote = data.variantCount > 20
+      ? '<br><span style="color:var(--accent-2)">⚡ Для генерації буде використано перші 20 варіантів</span>'
+      : '';
+    factsSummary.innerHTML = 'Зібрано <strong>' + data.facts.length + '</strong> фактів з <strong>' + data.variantCount + '</strong> виділених елементів' + truncNote;
 
     factsList.innerHTML = data.facts.map(function(f) {
       return '<li data-category="' + f.category + '">'
@@ -890,20 +893,24 @@
 
       if (currentMode === 'facts' && currentFactsData) {
         // Fact-based generation (multi-selection)
+        // Limit variants to 20 and facts to 50 to avoid oversized payloads
+        var limitedVariants = currentFactsData.variants.slice(0, 20);
+        var limitedFacts = currentFactsData.facts.slice(0, 50);
+        var limitedContexts = (currentFactsData.usageContexts || []).slice(0, 30);
         body = {
           mode: 'facts',
           componentName: currentFactsData.componentName,
-          facts: currentFactsData.facts,
-          variants: currentFactsData.variants.map(function(v) {
+          facts: limitedFacts,
+          variants: limitedVariants.map(function(v) {
             return {
               name: v.name,
               variantProperties: v.variantProperties,
               fields: v.fields,
-              textContent: v.textContent,
+              textContent: v.textContent.slice(0, 5),
               hasIcon: v.hasIcon,
             };
           }),
-          usageContexts: currentFactsData.usageContexts || [],
+          usageContexts: limitedContexts,
         };
       } else {
         // Legacy single/variant mode
