@@ -966,6 +966,212 @@ function commonPrefix(strings: string[]): string {
   return prefix;
 }
 
+// ─── Frame scan: find components across selected frames ─────────────────────
+
+interface FrameComponentGroup {
+  componentSetName: string;
+  componentSetId: string;
+  instanceCount: number;
+  frameContexts: { frameName: string; count: number; parentChains: string[][]; siblingNames: string[][] }[];
+  variantPropertiesUsed: Record<string, string[]>;
+}
+
+/** Find all instances in a frame tree, grouped by component set */
+async function scanFramesForComponents(
+  frames: readonly (FrameNode | SectionNode | GroupNode)[]
+): Promise<void> {
+  const groups = new Map<string, {
+    componentSetName: string;
+    componentSetId: string;
+    instances: { instance: InstanceNode; frameName: string }[];
+    variantPropsUsed: Map<string, Set<string>>;
+  }>();
+
+  for (const frame of frames) {
+    const instances = (frame as FrameNode).findAll(
+      (n) => n.type === "INSTANCE"
+    ) as InstanceNode[];
+
+    for (const inst of instances) {
+      let mainComp: ComponentNode | null = null;
+      try {
+        mainComp = await inst.getMainComponentAsync();
+      } catch {
+        continue;
+      }
+      if (!mainComp) continue;
+
+      const parentSet = mainComp.parent;
+      if (!parentSet || parentSet.type !== "COMPONENT_SET") continue;
+
+      const csId = parentSet.id;
+      const csName = (parentSet as ComponentSetNode).name;
+
+      if (!groups.has(csId)) {
+        groups.set(csId, {
+          componentSetName: csName,
+          componentSetId: csId,
+          instances: [],
+          variantPropsUsed: new Map(),
+        });
+      }
+
+      const group = groups.get(csId)!;
+      group.instances.push({ instance: inst, frameName: frame.name });
+
+      // Track which variant properties are used
+      const vProps = mainComp.variantProperties;
+      if (vProps) {
+        for (const [key, val] of Object.entries(vProps)) {
+          if (!group.variantPropsUsed.has(key)) {
+            group.variantPropsUsed.set(key, new Set());
+          }
+          group.variantPropsUsed.get(key)!.add(val);
+        }
+      }
+    }
+  }
+
+  // Build summary for UI
+  const frameNames = frames.map((f) => f.name);
+  const componentGroups: {
+    componentSetName: string;
+    componentSetId: string;
+    instanceCount: number;
+    frameContexts: { frameName: string; count: number; parentChains: string[][]; siblingNames: string[][] }[];
+    variantPropertiesUsed: Record<string, string[]>;
+  }[] = [];
+
+  for (const [, group] of groups) {
+    // Group instances by frame
+    const byFrame = new Map<string, { count: number; parentChains: string[][]; siblingNames: string[][] }>();
+    for (const { instance, frameName } of group.instances) {
+      if (!byFrame.has(frameName)) {
+        byFrame.set(frameName, { count: 0, parentChains: [], siblingNames: [] });
+      }
+      const f = byFrame.get(frameName)!;
+      f.count++;
+      if (f.parentChains.length < 5) {
+        f.parentChains.push(getParentChain(instance));
+        f.siblingNames.push(getSiblingComponentNames(instance));
+      }
+    }
+
+    const frameContexts: { frameName: string; count: number; parentChains: string[][]; siblingNames: string[][] }[] = [];
+    for (const [fn, data] of byFrame) {
+      frameContexts.push({ frameName: fn, ...data });
+    }
+
+    const variantPropertiesUsed: Record<string, string[]> = {};
+    for (const [key, vals] of group.variantPropsUsed) {
+      variantPropertiesUsed[key] = [...vals];
+    }
+
+    componentGroups.push({
+      componentSetName: group.componentSetName,
+      componentSetId: group.componentSetId,
+      instanceCount: group.instances.length,
+      frameContexts,
+      variantPropertiesUsed,
+    });
+  }
+
+  // Sort by instance count descending
+  componentGroups.sort((a, b) => b.instanceCount - a.instanceCount);
+
+  figma.ui.postMessage({
+    type: "frame-scan-data",
+    payload: {
+      frameNames,
+      totalComponents: componentGroups.length,
+      groups: componentGroups,
+    },
+  });
+}
+
+/** When UI requests facts for a specific component from frame scan */
+async function generateFactsForComponentInFrames(
+  componentSetId: string,
+  frameContexts: FrameComponentGroup["frameContexts"],
+  variantPropertiesUsed: Record<string, string[]>
+): Promise<void> {
+  // Find the component set node
+  const csNode = await figma.getNodeByIdAsync(componentSetId) as ComponentSetNode | null;
+  if (!csNode || csNode.type !== "COMPONENT_SET") {
+    figma.ui.postMessage({ type: "error", message: "Component Set не знайдено." });
+    return;
+  }
+
+  // Build variant infos from the component set children
+  const allChildren = csNode.children as SceneNode[];
+  const children = allChildren.length > 30 ? allChildren.slice(0, 30) : allChildren;
+  const variants = await Promise.all(children.map((n) => buildVariantInfo(n)));
+
+  // Generate comparison facts
+  const rawFacts = generateFacts(variants, csNode.name);
+
+  // Build usage contexts from the frame scan data
+  const usageContexts: UsageContext[] = [];
+  for (const fc of frameContexts) {
+    for (let i = 0; i < fc.parentChains.length; i++) {
+      usageContexts.push({
+        instanceName: csNode.name,
+        parentChain: fc.parentChains[i],
+        siblingComponents: fc.siblingNames[i] || [],
+        pageName: figma.currentPage.name,
+      });
+    }
+  }
+
+  // Add frame-specific context facts
+  const frameFacts: ComponentFact[] = [];
+  for (const fc of frameContexts) {
+    frameFacts.push({
+      fact: `Used ${fc.count} time(s) in frame "${fc.frameName}"`,
+      category: "structure",
+    });
+    // Unique parent names within this frame
+    const parentNames = new Set<string>();
+    for (const chain of fc.parentChains) {
+      if (chain[0]) parentNames.add(chain[0]);
+    }
+    if (parentNames.size > 0) {
+      frameFacts.push({
+        fact: `In "${fc.frameName}", placed inside: ${[...parentNames].join(", ")}`,
+        category: "structure",
+      });
+    }
+  }
+
+  // Which variant properties are actually used across frames
+  for (const [key, vals] of Object.entries(variantPropertiesUsed)) {
+    frameFacts.push({
+      fact: `Variant "${key}" values used across frames: ${vals.join(", ")}`,
+      category: "structure",
+    });
+  }
+
+  const semanticFacts = generateSemanticFacts(variants, usageContexts);
+  const facts = [...rawFacts, ...frameFacts, ...semanticFacts];
+
+  figma.ui.postMessage({
+    type: "component-facts-data",
+    payload: {
+      componentName: csNode.name,
+      variantCount: variants.length,
+      variants: variants.map((v) => ({
+        name: v.name,
+        variantProperties: v.variantProperties,
+        fields: v.fields,
+        textContent: v.textContent,
+        hasIcon: v.hasIcon,
+      })),
+      facts,
+      usageContexts,
+    },
+  });
+}
+
 // ─── Plugin entry point ──────────────────────────────────────────────────────
 
 figma.showUI(__html__, { width: 680, height: 580, themeColors: false });
@@ -983,30 +1189,47 @@ async function analyzeSelection() {
   }
 
   if (sel.length > 1) {
-    // Multi-selection → collect facts for spec generation
-    try {
-      const result = await collectFactsFromSelection(sel);
-      figma.ui.postMessage({
-        type: "component-facts-data",
-        payload: {
-          componentName: result.componentName,
-          variantCount: result.variants.length,
-          variants: result.variants.map((v) => ({
-            name: v.name,
-            variantProperties: v.variantProperties,
-            fields: v.fields,
-            textContent: v.textContent,
-            hasIcon: v.hasIcon,
-          })),
-          facts: result.facts,
-          usageContexts: result.usageContexts,
-        },
-      });
-    } catch {
-      figma.ui.postMessage({
-        type: "error",
-        message: "Не вдалося проаналізувати виділені елементи.",
-      });
+    // Determine if selection is frames/sections (screen scan) or components/instances (variant comparison)
+    const allContainers = sel.every(
+      (n) => n.type === "FRAME" || n.type === "SECTION" || n.type === "GROUP"
+    );
+
+    if (allContainers) {
+      // Frame scan mode → find all components used across selected frames
+      try {
+        await scanFramesForComponents(sel as readonly (FrameNode | SectionNode | GroupNode)[]);
+      } catch {
+        figma.ui.postMessage({
+          type: "error",
+          message: "Не вдалося просканувати виділені фрейми.",
+        });
+      }
+    } else {
+      // Component/instance multi-selection → collect facts
+      try {
+        const result = await collectFactsFromSelection(sel);
+        figma.ui.postMessage({
+          type: "component-facts-data",
+          payload: {
+            componentName: result.componentName,
+            variantCount: result.variants.length,
+            variants: result.variants.map((v) => ({
+              name: v.name,
+              variantProperties: v.variantProperties,
+              fields: v.fields,
+              textContent: v.textContent,
+              hasIcon: v.hasIcon,
+            })),
+            facts: result.facts,
+            usageContexts: result.usageContexts,
+          },
+        });
+      } catch {
+        figma.ui.postMessage({
+          type: "error",
+          message: "Не вдалося проаналізувати виділені елементи.",
+        });
+      }
     }
     return;
   }
@@ -1139,6 +1362,21 @@ async function analyzeSelection() {
     });
   }
 }
+
+// Handle messages from UI
+figma.ui.onmessage = async (msg: { type: string; componentSetId?: string; frameContexts?: FrameComponentGroup["frameContexts"]; variantPropertiesUsed?: Record<string, string[]> }) => {
+  if (msg.type === "generate-component-from-scan") {
+    try {
+      await generateFactsForComponentInFrames(
+        msg.componentSetId!,
+        msg.frameContexts!,
+        msg.variantPropertiesUsed!
+      );
+    } catch {
+      figma.ui.postMessage({ type: "error", message: "Не вдалося згенерувати факти для компонента." });
+    }
+  }
+};
 
 // Run once immediately on open
 analyzeSelection();

@@ -397,6 +397,44 @@
       color: var(--accent);
       border: 1px solid rgba(47, 143, 222, 0.25);
     }
+    /* ── Frame scan component list ── */
+    #scan-wrap {
+      display: none;
+      padding: 8px 0;
+    }
+
+    .scan-summary {
+      font-size: 11px; color: var(--text-muted); padding: 4px 16px 8px;
+    }
+    .scan-summary strong { color: var(--text); }
+
+    .scan-list {
+      list-style: none; padding: 0; margin: 0;
+    }
+    .scan-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 16px; cursor: pointer;
+      border-bottom: 1px solid var(--border);
+      transition: background 0.15s;
+    }
+    .scan-item:hover { background: var(--row-even); }
+
+    .scan-item-name {
+      font-size: 12px; font-weight: 600; color: var(--text);
+      flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .scan-item-count {
+      font-size: 10px; color: var(--text-muted);
+      background: var(--surface); padding: 2px 8px; border-radius: 10px;
+      flex-shrink: 0;
+    }
+    .scan-item-frames {
+      font-size: 10px; color: var(--accent); flex-shrink: 0;
+    }
+    .scan-item-arrow {
+      font-size: 10px; color: var(--text-muted); flex-shrink: 0;
+    }
+
     #gen-btn:disabled {
       background: var(--border); color: var(--text-muted);
       cursor: default; opacity: 1; border: none;
@@ -485,6 +523,11 @@
   <div id="accordion-container"></div>
 </div>
 
+<div id="scan-wrap">
+  <div class="scan-summary" id="scan-summary"></div>
+  <ul class="scan-list" id="scan-list"></ul>
+</div>
+
 <div id="facts-wrap">
   <div class="facts-summary" id="facts-summary"></div>
   <ul class="facts-list" id="facts-list"></ul>
@@ -502,12 +545,13 @@
 <script>
   // ─── State ───────────────────────────────────────────────────────────────
 
-  let currentMode = null; // 'single' | 'multi' | 'variant' | 'facts'
+  let currentMode = null; // 'single' | 'multi' | 'variant' | 'facts' | 'scan'
   let currentFields = null;
   let currentComponents = null;
   let currentVariantData = null;
   let currentAiDoc = null;
   let currentFactsData = null;
+  let currentScanData = null;
 
   const state      = document.getElementById('state');
   const nodeInfo   = document.getElementById('node-info');
@@ -526,6 +570,9 @@
   const variantFixedProps = document.getElementById('variant-fixed-props');
   const variantTableContainer = document.getElementById('variant-table-container');
   const aiDocWrap  = document.getElementById('ai-doc-wrap');
+  const scanWrap   = document.getElementById('scan-wrap');
+  const scanSummary = document.getElementById('scan-summary');
+  const scanList   = document.getElementById('scan-list');
   const factsWrap  = document.getElementById('facts-wrap');
   const factsSummary = document.getElementById('facts-summary');
   const factsList  = document.getElementById('facts-list');
@@ -536,6 +583,7 @@
     tableWrap.style.display   = 'none';
     multiWrap.style.display   = 'none';
     variantWrap.style.display = 'none';
+    scanWrap.style.display    = 'none';
     factsWrap.style.display   = 'none';
     aiDocWrap.style.display   = 'none';
     nodeInfo.style.display    = 'none';
@@ -546,6 +594,7 @@
     currentVariantData = null;
     currentAiDoc = null;
     currentFactsData = null;
+    currentScanData = null;
   }
 
   // ─── Source → badge ──────────────────────────────────────────────────────
@@ -712,6 +761,54 @@
       + headerCols + '</tr></thead><tbody>' + bodyRows + '</tbody></table>';
   }
 
+  // ─── Render frame scan view ──────────────────────────────────────────────
+
+  function renderFrameScan(data) {
+    hideAll();
+    currentMode = 'scan';
+    currentScanData = data;
+
+    nodeNameEl.textContent = data.frameNames.join(' + ');
+    nodeTypeEl.textContent = data.totalComponents + ' components';
+    nodeInfo.style.display  = 'flex';
+    scanWrap.style.display  = 'block';
+    copyBtn.disabled        = true;
+    genBtn.disabled         = true;
+
+    scanSummary.innerHTML = 'Знайдено <strong>' + data.totalComponents + '</strong> компонентів у фреймах: <strong>' + data.frameNames.join('</strong>, <strong>') + '</strong>';
+
+    scanList.innerHTML = data.groups.map(function(g, i) {
+      var frameInfo = g.frameContexts.map(function(fc) {
+        return fc.frameName + ' (' + fc.count + ')';
+      }).join(', ');
+      return '<li class="scan-item" data-index="' + i + '">'
+        + '<span class="scan-item-name">' + g.componentSetName + '</span>'
+        + '<span class="scan-item-frames">' + frameInfo + '</span>'
+        + '<span class="scan-item-count">' + g.instanceCount + ' uses</span>'
+        + '<span class="scan-item-arrow">▶</span>'
+        + '</li>';
+    }).join('');
+
+    scanList.querySelectorAll('.scan-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        var idx = parseInt(item.getAttribute('data-index'));
+        var group = data.groups[idx];
+
+        // Show loading state
+        item.style.opacity = '0.5';
+        item.querySelector('.scan-item-arrow').textContent = '⏳';
+
+        // Request facts from plugin code
+        parent.postMessage({ pluginMessage: {
+          type: 'generate-component-from-scan',
+          componentSetId: group.componentSetId,
+          frameContexts: group.frameContexts,
+          variantPropertiesUsed: group.variantPropertiesUsed,
+        }}, '*');
+      });
+    });
+  }
+
   // ─── Render facts view (multi-selection) ─────────────────────────────────
 
   function renderFacts(data) {
@@ -776,6 +873,9 @@
         break;
       case 'component-facts-data':
         renderFacts(msg.payload);
+        break;
+      case 'frame-scan-data':
+        renderFrameScan(msg.payload);
         break;
       case 'no-selection':
         showState('↖', 'Виберіть елемент', 'Клацніть на будь-який шар у Figma');
