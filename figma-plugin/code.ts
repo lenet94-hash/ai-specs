@@ -984,6 +984,7 @@ async function scanFramesForComponents(
     componentSetName: string;
     componentSetId: string;
     instances: { instance: InstanceNode; frameName: string }[];
+    usedVariantIds: Set<string>;
     variantPropsUsed: Map<string, Set<string>>;
   }>();
 
@@ -1012,12 +1013,16 @@ async function scanFramesForComponents(
           componentSetName: csName,
           componentSetId: csId,
           instances: [],
+          usedVariantIds: new Set<string>(),
           variantPropsUsed: new Map(),
         });
       }
 
       const group = groups.get(csId)!;
       group.instances.push({ instance: inst, frameName: frame.name });
+
+      // Track the actual component node (variant) used
+      group.usedVariantIds.add(mainComp.id);
 
       // Track which variant properties are used
       const vProps = mainComp.variantProperties;
@@ -1038,6 +1043,7 @@ async function scanFramesForComponents(
     componentSetName: string;
     componentSetId: string;
     instanceCount: number;
+    usedVariantIds: string[];
     frameContexts: { frameName: string; count: number; parentChains: string[][]; siblingNames: string[][] }[];
     variantPropertiesUsed: Record<string, string[]>;
   }[] = [];
@@ -1071,6 +1077,7 @@ async function scanFramesForComponents(
       componentSetName: group.componentSetName,
       componentSetId: group.componentSetId,
       instanceCount: group.instances.length,
+      usedVariantIds: [...group.usedVariantIds],
       frameContexts,
       variantPropertiesUsed,
     });
@@ -1092,6 +1099,7 @@ async function scanFramesForComponents(
 /** When UI requests facts for a specific component from frame scan */
 async function generateFactsForComponentInFrames(
   componentSetId: string,
+  usedVariantIds: string[],
   frameContexts: FrameComponentGroup["frameContexts"],
   variantPropertiesUsed: Record<string, string[]>
 ): Promise<void> {
@@ -1102,10 +1110,14 @@ async function generateFactsForComponentInFrames(
     return;
   }
 
-  // Build variant infos from the component set children
-  const allChildren = csNode.children as SceneNode[];
-  const children = allChildren.length > 30 ? allChildren.slice(0, 30) : allChildren;
-  const variants = await Promise.all(children.map((n) => buildVariantInfo(n)));
+  // Only analyze variants that are actually used on the selected frames
+  const usedIdSet = new Set(usedVariantIds);
+  const usedChildren = (csNode.children as SceneNode[]).filter((c) => usedIdSet.has(c.id));
+  // Fallback to all children if no matches (shouldn't happen)
+  const children = usedChildren.length > 0 ? usedChildren : (csNode.children as SceneNode[]);
+  // Limit to 30 max
+  const limited = children.length > 30 ? children.slice(0, 30) : children;
+  const variants = await Promise.all(limited.map((n) => buildVariantInfo(n)));
 
   // Generate comparison facts
   const rawFacts = generateFacts(variants, csNode.name);
@@ -1343,11 +1355,12 @@ async function analyzeSelection() {
 }
 
 // Handle messages from UI
-figma.ui.onmessage = async (msg: { type: string; componentSetId?: string; frameContexts?: FrameComponentGroup["frameContexts"]; variantPropertiesUsed?: Record<string, string[]> }) => {
+figma.ui.onmessage = async (msg: { type: string; componentSetId?: string; usedVariantIds?: string[]; frameContexts?: FrameComponentGroup["frameContexts"]; variantPropertiesUsed?: Record<string, string[]> }) => {
   if (msg.type === "generate-component-from-scan") {
     try {
       await generateFactsForComponentInFrames(
         msg.componentSetId!,
+        msg.usedVariantIds || [],
         msg.frameContexts!,
         msg.variantPropertiesUsed!
       );

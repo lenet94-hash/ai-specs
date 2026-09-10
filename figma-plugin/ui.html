@@ -798,10 +798,11 @@
         item.style.opacity = '0.5';
         item.querySelector('.scan-item-arrow').textContent = '⏳';
 
-        // Request facts from plugin code
+        // Request facts from plugin code — only for variants used on frames
         parent.postMessage({ pluginMessage: {
           type: 'generate-component-from-scan',
           componentSetId: group.componentSetId,
+          usedVariantIds: group.usedVariantIds,
           frameContexts: group.frameContexts,
           variantPropertiesUsed: group.variantPropertiesUsed,
         }}, '*');

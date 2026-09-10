@@ -840,11 +840,14 @@ async function scanFramesForComponents(frames) {
                     componentSetName: csName,
                     componentSetId: csId,
                     instances: [],
+                    usedVariantIds: new Set(),
                     variantPropsUsed: new Map(),
                 });
             }
             const group = groups.get(csId);
             group.instances.push({ instance: inst, frameName: frame.name });
+            // Track the actual component node (variant) used
+            group.usedVariantIds.add(mainComp.id);
             // Track which variant properties are used
             const vProps = mainComp.variantProperties;
             if (vProps) {
@@ -886,6 +889,7 @@ async function scanFramesForComponents(frames) {
             componentSetName: group.componentSetName,
             componentSetId: group.componentSetId,
             instanceCount: group.instances.length,
+            usedVariantIds: [...group.usedVariantIds],
             frameContexts,
             variantPropertiesUsed,
         });
@@ -902,17 +906,21 @@ async function scanFramesForComponents(frames) {
     });
 }
 /** When UI requests facts for a specific component from frame scan */
-async function generateFactsForComponentInFrames(componentSetId, frameContexts, variantPropertiesUsed) {
+async function generateFactsForComponentInFrames(componentSetId, usedVariantIds, frameContexts, variantPropertiesUsed) {
     // Find the component set node
     const csNode = await figma.getNodeByIdAsync(componentSetId);
     if (!csNode || csNode.type !== "COMPONENT_SET") {
         figma.ui.postMessage({ type: "error", message: "Component Set не знайдено." });
         return;
     }
-    // Build variant infos from the component set children
-    const allChildren = csNode.children;
-    const children = allChildren.length > 30 ? allChildren.slice(0, 30) : allChildren;
-    const variants = await Promise.all(children.map((n) => buildVariantInfo(n)));
+    // Only analyze variants that are actually used on the selected frames
+    const usedIdSet = new Set(usedVariantIds);
+    const usedChildren = csNode.children.filter((c) => usedIdSet.has(c.id));
+    // Fallback to all children if no matches (shouldn't happen)
+    const children = usedChildren.length > 0 ? usedChildren : csNode.children;
+    // Limit to 30 max
+    const limited = children.length > 30 ? children.slice(0, 30) : children;
+    const variants = await Promise.all(limited.map((n) => buildVariantInfo(n)));
     // Generate comparison facts
     const rawFacts = generateFacts(variants, csNode.name);
     // Build usage contexts from the frame scan data
@@ -1135,7 +1143,7 @@ async function analyzeSelection() {
 figma.ui.onmessage = async (msg) => {
     if (msg.type === "generate-component-from-scan") {
         try {
-            await generateFactsForComponentInFrames(msg.componentSetId, msg.frameContexts, msg.variantPropertiesUsed);
+            await generateFactsForComponentInFrames(msg.componentSetId, msg.usedVariantIds || [], msg.frameContexts, msg.variantPropertiesUsed);
         }
         catch (_a) {
             figma.ui.postMessage({ type: "error", message: "Не вдалося згенерувати факти для компонента." });
