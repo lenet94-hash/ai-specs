@@ -501,6 +501,34 @@
       background: none; color: var(--text-muted);
       border: 1px solid var(--border);
     }
+    /* Saved docs list on empty state */
+    #saved-docs-list {
+      padding: 0 16px 16px;
+    }
+    .saved-docs-heading {
+      font-size: 11px; font-weight: 600; color: var(--text-muted);
+      margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .saved-doc-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 12px; margin-bottom: 6px;
+      background: rgba(47, 143, 222, 0.06);
+      border: 1px solid rgba(47, 143, 222, 0.15);
+      border-radius: 6px; cursor: pointer;
+      transition: background 0.15s;
+    }
+    .saved-doc-item:hover {
+      background: rgba(47, 143, 222, 0.12);
+    }
+    .saved-doc-item-name {
+      font-size: 12px; font-weight: 600; color: var(--text);
+    }
+    .saved-doc-item-meta {
+      font-size: 10px; color: var(--text-muted); margin-top: 2px;
+    }
+    .saved-doc-item-arrow {
+      color: var(--accent); font-size: 12px; flex-shrink: 0; margin-left: 8px;
+    }
   </style>
 </head>
 <body>
@@ -518,6 +546,8 @@
   <div class="state-title">Виберіть елемент</div>
   <div class="state-hint">Клацніть на будь-який шар у Figma, щоб побачити специфікацію</div>
 </div>
+
+<div id="saved-docs-list" style="display:none"></div>
 
 <div id="error-box"></div>
 
@@ -556,7 +586,7 @@
 </div>
 
 <div id="saved-doc-banner">
-  <div class="saved-doc-title">Збережена документація</div>
+  <div class="saved-doc-title" id="saved-doc-title"></div>
   <div class="saved-doc-meta" id="saved-doc-meta"></div>
   <div class="saved-doc-actions">
     <button id="saved-show-btn">Показати</button>
@@ -622,7 +652,11 @@
   const savedShowBtn = document.getElementById('saved-show-btn');
   const savedAddBtn = document.getElementById('saved-add-btn');
   const savedResetBtn = document.getElementById('saved-reset-btn');
+  const savedDocsList = document.getElementById('saved-docs-list');
   var pendingSavedDoc = null; // holds saved doc while viewing facts
+  var pendingDocCheckId = null; // tracks which componentSetId we're checking
+  var allSavedDocs = []; // cached list of all saved docs
+  var viewingFromSavedList = false; // true when viewing doc from saved list
 
   function hideAll() {
     state.style.display       = 'none';
@@ -635,6 +669,8 @@
     nodeInfo.style.display    = 'none';
     errorBox.style.display    = 'none';
     backBtn.style.display     = 'none';
+    savedBanner.style.display = 'none';
+    savedDocsList.style.display = 'none';
     currentMode = null;
     currentFields = null;
     currentComponents = null;
@@ -642,6 +678,7 @@
     currentAiDoc = null;
     currentFactsData = null;
     currentScanData = null;
+    viewingFromSavedList = false;
   }
 
   // ─── Source → badge ──────────────────────────────────────────────────────
@@ -890,15 +927,55 @@
     // Check for saved doc
     savedBanner.style.display = 'none';
     pendingSavedDoc = null;
-    if (data.componentSetId) {
+    pendingDocCheckId = data.componentName || null;
+    if (data.componentName) {
       parent.postMessage({ pluginMessage: {
         type: 'check-saved-doc',
-        componentSetId: data.componentSetId,
+        componentName: data.componentName,
       }}, '*');
     }
   }
 
   // ─── Show state messages ─────────────────────────────────────────────────
+
+  function renderSavedDocsList() {
+    if (allSavedDocs.length === 0) {
+      savedDocsList.style.display = 'none';
+      return;
+    }
+    savedDocsList.innerHTML = '<div class="saved-docs-heading">Збережені документації</div>'
+      + allSavedDocs.map(function(doc, i) {
+        var date = new Date(doc.generatedAt);
+        var timeStr = date.toLocaleString('uk-UA', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' });
+        var frames = doc.frameNames.join(', ');
+        return '<div class="saved-doc-item" data-doc-index="' + i + '">'
+          + '<div>'
+          + '<div class="saved-doc-item-name">' + doc.componentName + '</div>'
+          + '<div class="saved-doc-item-meta">' + frames + ' · ' + timeStr + '</div>'
+          + '</div>'
+          + '<span class="saved-doc-item-arrow">▶</span>'
+          + '</div>';
+      }).join('');
+    savedDocsList.style.display = 'block';
+
+    savedDocsList.querySelectorAll('.saved-doc-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        var idx = parseInt(item.getAttribute('data-doc-index'));
+        var doc = allSavedDocs[idx];
+        if (doc && doc.doc) {
+          hideAll();
+          currentAiDoc = doc.doc;
+          viewingFromSavedList = true;
+          renderAiDoc(doc.doc);
+          nodeNameEl.textContent = doc.componentName;
+          nodeTypeEl.textContent = doc.frameNames.join(', ');
+          nodeInfo.style.display = 'flex';
+          backBtn.style.display = 'block';
+          copyBtn.disabled = false;
+        }
+      });
+    });
+  }
 
   function showState(icon, title, hint) {
     hideAll();
@@ -907,6 +984,8 @@
       + '<div class="state-hint">' + hint + '</div>';
     state.style.display = 'flex';
     copyBtn.disabled = true;
+    // Show saved docs list if available
+    renderSavedDocsList();
   }
 
   function showError(msg) {
@@ -941,12 +1020,15 @@
         renderFrameScan(msg.payload);
         break;
       case 'saved-doc-result':
-        if (msg.payload && currentMode === 'facts') {
+        // Check facts view is visible and response matches our pending request
+        if (msg.payload && factsWrap.style.display !== 'none' && pendingDocCheckId) {
           pendingSavedDoc = msg.payload;
+          pendingDocCheckId = null;
           var frameList = msg.payload.frameNames.join(', ');
           var date = new Date(msg.payload.generatedAt);
           var timeStr = date.toLocaleString('uk-UA', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' });
           savedMeta.textContent = 'Контексти: ' + frameList + ' | ' + timeStr;
+          document.getElementById('saved-doc-title').textContent = msg.payload.componentName || 'Збережена документація';
           savedBanner.style.display = 'block';
           genBtn.textContent = '✦ Генерувати заново';
         }
@@ -960,13 +1042,24 @@
       case 'error':
         showError(msg.message);
         break;
+      case 'all-saved-docs':
+        allSavedDocs = msg.payload || [];
+        console.log('[all-saved-docs] count=' + allSavedDocs.length + ' stateVisible=' + (state.style.display !== 'none'));
+        // If currently on empty state, refresh the list
+        if (state.style.display !== 'none') {
+          renderSavedDocsList();
+        }
+        break;
     }
   };
 
   // ─── Back button ─────────────────────────────────────────────────────────
 
   backBtn.addEventListener('click', function() {
-    if (currentScanData) {
+    if (viewingFromSavedList) {
+      viewingFromSavedList = false;
+      showState('↖', 'Виберіть елемент', 'Клацніть на будь-який шар у Figma');
+    } else if (currentScanData) {
       renderFrameScan(currentScanData);
     }
   });
@@ -988,10 +1081,10 @@
   });
 
   savedResetBtn.addEventListener('click', function() {
-    if (!currentFactsData || !currentFactsData.componentSetId) return;
+    if (!currentFactsData || !currentFactsData.componentName) return;
     parent.postMessage({ pluginMessage: {
       type: 'delete-doc',
-      componentSetId: currentFactsData.componentSetId,
+      componentName: currentFactsData.componentName,
     }}, '*');
     pendingSavedDoc = null;
     savedBanner.style.display = 'none';

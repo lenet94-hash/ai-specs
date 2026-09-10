@@ -800,7 +800,7 @@ async function collectFactsFromSelection(nodes) {
     // Generate semantic interpretation facts
     const semanticFacts = generateSemanticFacts(variants, usageContexts);
     const facts = [...rawFacts, ...semanticFacts];
-    return { componentName, variants, facts, usageContexts };
+    return { componentName, componentSetId, variants, facts, usageContexts };
 }
 function commonPrefix(strings) {
     if (strings.length === 0)
@@ -908,6 +908,7 @@ async function scanFramesForComponents(frames) {
 /** When UI requests facts for a specific component from frame scan */
 async function generateFactsForComponentInFrames(componentSetId, usedVariantIds, frameContexts, variantPropertiesUsed) {
     // Find the component set node
+    console.log("[generateFacts] componentSetId=" + componentSetId);
     const csNode = await figma.getNodeByIdAsync(componentSetId);
     if (!csNode || csNode.type !== "COMPONENT_SET") {
         figma.ui.postMessage({ type: "error", message: "Component Set не знайдено." });
@@ -1015,6 +1016,7 @@ async function analyzeSelection() {
                 figma.ui.postMessage({
                     type: "component-facts-data",
                     payload: {
+                        componentSetId: result.componentSetId,
                         componentName: result.componentName,
                         variantCount: result.variants.length,
                         variants: result.variants.map((v) => ({
@@ -1055,6 +1057,7 @@ async function analyzeSelection() {
             figma.ui.postMessage({
                 type: "component-facts-data",
                 payload: {
+                    componentSetId: csNode.id,
                     componentName: csNode.name,
                     variantCount: result.variants.length,
                     variants: result.variants.map((v) => ({
@@ -1140,30 +1143,75 @@ async function analyzeSelection() {
         });
     }
 }
-async function loadSavedDoc(componentSetId) {
+async function loadSavedDoc(componentName) {
     try {
-        const data = await figma.clientStorage.getAsync(`doc:${componentSetId}`);
+        const data = await figma.clientStorage.getAsync(`doc-name:${componentName}`);
         return data || null;
     }
     catch (_a) {
         return null;
     }
 }
-async function saveDocs(doc) {
+async function getDocIndex() {
     try {
-        await figma.clientStorage.setAsync(`doc:${doc.componentSetId}`, doc);
+        const idx = await figma.clientStorage.getAsync("doc-index");
+        return Array.isArray(idx) ? idx : [];
+    }
+    catch (_a) {
+        return [];
+    }
+}
+async function saveDocIndex(names) {
+    try {
+        await figma.clientStorage.setAsync("doc-index", names);
     }
     catch (_a) {
         // Silently fail
     }
 }
-async function deleteSavedDoc(componentSetId) {
+async function saveDocs(doc) {
     try {
-        await figma.clientStorage.deleteAsync(`doc:${componentSetId}`);
+        await figma.clientStorage.setAsync(`doc-name:${doc.componentName}`, doc);
+        // Update index
+        const idx = await getDocIndex();
+        console.log("[saveDocs] name=" + doc.componentName + " indexBefore=" + JSON.stringify(idx));
+        if (idx.indexOf(doc.componentName) === -1) {
+            idx.push(doc.componentName);
+            await saveDocIndex(idx);
+        }
+        console.log("[saveDocs] indexAfter=" + JSON.stringify(idx));
+    }
+    catch (e) {
+        console.log("[saveDocs] ERROR: " + String(e));
+        // Silently fail
+    }
+}
+async function deleteSavedDoc(componentName) {
+    try {
+        await figma.clientStorage.deleteAsync(`doc-name:${componentName}`);
+        // Update index
+        const idx = await getDocIndex();
+        const pos = idx.indexOf(componentName);
+        if (pos !== -1) {
+            idx.splice(pos, 1);
+            await saveDocIndex(idx);
+        }
     }
     catch (_a) {
         // Silently fail
     }
+}
+async function loadAllSavedDocs() {
+    const idx = await getDocIndex();
+    console.log("[loadAllSavedDocs] index=" + JSON.stringify(idx));
+    const docs = [];
+    for (const name of idx) {
+        const doc = await loadSavedDoc(name);
+        if (doc)
+            docs.push(doc);
+    }
+    console.log("[loadAllSavedDocs] found=" + docs.length);
+    return docs;
 }
 // Handle messages from UI
 figma.ui.onmessage = async (msg) => {
@@ -1176,7 +1224,9 @@ figma.ui.onmessage = async (msg) => {
         }
     }
     if (msg.type === "check-saved-doc") {
-        const saved = await loadSavedDoc(msg.componentSetId);
+        const name = msg.componentName || "";
+        const saved = await loadSavedDoc(name);
+        console.log("[check-saved-doc] name=" + name + " found=" + (saved !== null));
         figma.ui.postMessage({
             type: "saved-doc-result",
             payload: saved,
@@ -1185,11 +1235,25 @@ figma.ui.onmessage = async (msg) => {
     if (msg.type === "save-doc") {
         if (msg.savedDoc) {
             await saveDocs(msg.savedDoc);
+            // Send updated list back
+            const docs = await loadAllSavedDocs();
+            figma.ui.postMessage({ type: "all-saved-docs", payload: docs });
         }
     }
     if (msg.type === "delete-doc") {
-        await deleteSavedDoc(msg.componentSetId);
+        await deleteSavedDoc(msg.componentName);
+        // Send updated list back
+        const docs = await loadAllSavedDocs();
+        figma.ui.postMessage({ type: "all-saved-docs", payload: docs });
+    }
+    if (msg.type === "load-all-docs") {
+        const docs = await loadAllSavedDocs();
+        figma.ui.postMessage({ type: "all-saved-docs", payload: docs });
     }
 };
 // Run once immediately on open
 analyzeSelection();
+// Also send saved docs list to UI
+loadAllSavedDocs().then((docs) => {
+    figma.ui.postMessage({ type: "all-saved-docs", payload: docs });
+});
