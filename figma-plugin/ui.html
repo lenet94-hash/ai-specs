@@ -402,6 +402,38 @@
       cursor: default; opacity: 1; border: none;
     }
     #gen-btn.loading { opacity: 0.6; cursor: default; }
+
+    /* ── Facts view (multi-selection) ── */
+    #facts-wrap {
+      display: none;
+      padding: 8px 0;
+    }
+
+    .facts-summary {
+      font-size: 11px; color: var(--text-muted); padding: 4px 16px 8px;
+    }
+    .facts-summary strong { color: var(--text); }
+
+    .facts-list {
+      list-style: none; padding: 0; margin: 0 16px 8px;
+    }
+    .facts-list li {
+      padding: 4px 8px; font-size: 11px; color: var(--text);
+      line-height: 1.4; border-left: 2px solid var(--border);
+      margin-bottom: 2px;
+    }
+    .facts-list li[data-category="visual"] { border-left-color: #A78BFA; }
+    .facts-list li[data-category="typography"] { border-left-color: #F59E0B; }
+    .facts-list li[data-category="spacing"] { border-left-color: #10B981; }
+    .facts-list li[data-category="tokens"] { border-left-color: var(--token); }
+    .facts-list li[data-category="states"] { border-left-color: #EF4444; }
+    .facts-list li[data-category="content"] { border-left-color: #EC4899; }
+    .facts-list li[data-category="structure"] { border-left-color: var(--accent); }
+
+    .fact-category {
+      font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px;
+      color: var(--text-muted); margin-right: 4px;
+    }
   </style>
 </head>
 <body>
@@ -453,6 +485,11 @@
   <div id="accordion-container"></div>
 </div>
 
+<div id="facts-wrap">
+  <div class="facts-summary" id="facts-summary"></div>
+  <ul class="facts-list" id="facts-list"></ul>
+</div>
+
 <div id="ai-doc-wrap" style="display:none;"></div>
 
 <footer>
@@ -465,11 +502,12 @@
 <script>
   // ─── State ───────────────────────────────────────────────────────────────
 
-  let currentMode = null; // 'single' | 'multi' | 'variant'
+  let currentMode = null; // 'single' | 'multi' | 'variant' | 'facts'
   let currentFields = null;
   let currentComponents = null;
   let currentVariantData = null;
   let currentAiDoc = null;
+  let currentFactsData = null;
 
   const state      = document.getElementById('state');
   const nodeInfo   = document.getElementById('node-info');
@@ -488,6 +526,9 @@
   const variantFixedProps = document.getElementById('variant-fixed-props');
   const variantTableContainer = document.getElementById('variant-table-container');
   const aiDocWrap  = document.getElementById('ai-doc-wrap');
+  const factsWrap  = document.getElementById('facts-wrap');
+  const factsSummary = document.getElementById('facts-summary');
+  const factsList  = document.getElementById('facts-list');
   const genBtn     = document.getElementById('gen-btn');
 
   function hideAll() {
@@ -495,6 +536,7 @@
     tableWrap.style.display   = 'none';
     multiWrap.style.display   = 'none';
     variantWrap.style.display = 'none';
+    factsWrap.style.display   = 'none';
     aiDocWrap.style.display   = 'none';
     nodeInfo.style.display    = 'none';
     errorBox.style.display    = 'none';
@@ -503,6 +545,7 @@
     currentComponents = null;
     currentVariantData = null;
     currentAiDoc = null;
+    currentFactsData = null;
   }
 
   // ─── Source → badge ──────────────────────────────────────────────────────
@@ -669,6 +712,29 @@
       + headerCols + '</tr></thead><tbody>' + bodyRows + '</tbody></table>';
   }
 
+  // ─── Render facts view (multi-selection) ─────────────────────────────────
+
+  function renderFacts(data) {
+    hideAll();
+    currentMode = 'facts';
+    currentFactsData = data;
+
+    nodeNameEl.textContent = data.componentName;
+    nodeTypeEl.textContent = data.variantCount + ' variants selected';
+    nodeInfo.style.display  = 'flex';
+    factsWrap.style.display = 'block';
+    genBtn.disabled         = false;
+    copyBtn.disabled        = true;
+
+    factsSummary.innerHTML = 'Зібрано <strong>' + data.facts.length + '</strong> фактів з <strong>' + data.variantCount + '</strong> виділених елементів';
+
+    factsList.innerHTML = data.facts.map(function(f) {
+      return '<li data-category="' + f.category + '">'
+        + '<span class="fact-category">' + f.category + '</span>'
+        + f.fact + '</li>';
+    }).join('');
+  }
+
   // ─── Show state messages ─────────────────────────────────────────────────
 
   function showState(icon, title, hint) {
@@ -705,11 +771,11 @@
       case 'variant-comparison-data':
         renderVariantComparison(msg.payload);
         break;
+      case 'component-facts-data':
+        renderFacts(msg.payload);
+        break;
       case 'no-selection':
         showState('↖', 'Виберіть елемент', 'Клацніть на будь-який шар у Figma');
-        break;
-      case 'multi-selection':
-        showState('⊟', 'Кілька елементів', 'Оберіть лише один елемент за раз');
         break;
       case 'no-components-in-frame':
         showState('◇', 'Компоненти не знайдено', 'На цьому фреймі не знайдено компонентів');
@@ -814,30 +880,61 @@
   genBtn.addEventListener('click', async function() {
     if (genBtn.disabled || genBtn.classList.contains('loading')) return;
 
-    var componentName = nodeNameEl.textContent;
-    var componentType = nodeTypeEl.textContent;
-    var props = {};
-
-    if (currentMode === 'single' && currentFields) {
-      currentFields.forEach(function(f) { props[f.label] = f.value; });
-    } else if (currentMode === 'variant' && currentVariantData && currentVariantData.variants.length > 0) {
-      currentVariantData.variants[0].fields.forEach(function(f) { props[f.label] = f.value; });
-      componentName = currentVariantData.componentSetName;
-      componentType = 'COMPONENT_SET';
-    } else {
-      return;
-    }
-
     genBtn.classList.add('loading');
     genBtn.disabled = true;
     genBtn.textContent = 'Генерується…';
     aiDocWrap.style.display = 'none';
 
     try {
+      var body;
+
+      if (currentMode === 'facts' && currentFactsData) {
+        // Fact-based generation (multi-selection)
+        body = {
+          mode: 'facts',
+          componentName: currentFactsData.componentName,
+          facts: currentFactsData.facts,
+          variants: currentFactsData.variants.map(function(v) {
+            return {
+              name: v.name,
+              variantProperties: v.variantProperties,
+              fields: v.fields,
+              textContent: v.textContent,
+              hasIcon: v.hasIcon,
+            };
+          }),
+        };
+      } else {
+        // Legacy single/variant mode
+        var componentName = nodeNameEl.textContent;
+        var componentType = nodeTypeEl.textContent;
+        var props = {};
+
+        if (currentMode === 'single' && currentFields) {
+          currentFields.forEach(function(f) { props[f.label] = f.value; });
+        } else if (currentMode === 'variant' && currentVariantData && currentVariantData.variants.length > 0) {
+          currentVariantData.variants[0].fields.forEach(function(f) { props[f.label] = f.value; });
+          componentName = currentVariantData.componentSetName;
+          componentType = 'COMPONENT_SET';
+        } else {
+          genBtn.classList.remove('loading');
+          genBtn.disabled = false;
+          genBtn.textContent = '✦ Generate Doc';
+          return;
+        }
+
+        body = {
+          mode: 'legacy',
+          componentName: componentName,
+          componentType: componentType,
+          properties: props,
+        };
+      }
+
       var res = await fetch('https://ai-specs.vercel.app/api/generate-spec', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ componentName: componentName, componentType: componentType, properties: props }),
+        body: JSON.stringify(body),
       });
 
       if (!res.ok) {
@@ -848,6 +945,7 @@
       var data = await res.json();
       currentAiDoc = data;
       renderAiDoc(data);
+      copyBtn.disabled = false;
     } catch (e) {
       aiDocWrap.innerHTML = '<div class="ai-doc-error">⚠ ' + (e.message || 'Помилка генерації') + '</div>';
       aiDocWrap.style.display = 'block';
@@ -870,7 +968,10 @@
   copyBtn.addEventListener('click', async function() {
     var md;
 
-    if (currentMode === 'variant' && currentVariantData) {
+    if (currentMode === 'facts' && currentAiDoc) {
+      md = '## ' + (currentFactsData ? currentFactsData.componentName : 'Component') + ' Specification\n\n'
+        + aiDocToMarkdown(currentAiDoc);
+    } else if (currentMode === 'variant' && currentVariantData) {
       md = variantToMarkdown(currentVariantData);
     } else if (currentMode === 'multi' && currentComponents) {
       md = currentComponents.map(function(comp) {

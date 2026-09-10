@@ -481,6 +481,275 @@ async function tryResolveVariants(
   };
 }
 
+// ─── Fact collection for multi-selection spec generation ─────────────────────
+
+interface ComponentFact {
+  fact: string;
+  category: "structure" | "visual" | "typography" | "spacing" | "tokens" | "states" | "content" | "accessibility";
+}
+
+interface VariantInfo {
+  name: string;
+  variantProperties: Record<string, string>;
+  fields: SpecField[];
+  textContent: string[];
+  hasIcon: boolean;
+  childCount: number;
+}
+
+/** Recursively find all TEXT nodes and return their characters */
+function collectTextContent(node: SceneNode): string[] {
+  const texts: string[] = [];
+  if (node.type === "TEXT") {
+    const chars = (node as TextNode).characters.trim();
+    if (chars) texts.push(chars);
+  }
+  if ("children" in node) {
+    for (const child of (node as ChildrenMixin).children) {
+      texts.push(...collectTextContent(child as SceneNode));
+    }
+  }
+  return texts;
+}
+
+/** Check if a node tree contains vector/icon-like elements */
+function hasIconChild(node: SceneNode): boolean {
+  if (node.type === "VECTOR" || node.type === "STAR" || node.type === "POLYGON" ||
+      node.type === "BOOLEAN_OPERATION" || node.type === "LINE") return true;
+  // Small frames/instances (< 32px) likely icons
+  if ((node.type === "INSTANCE" || node.type === "FRAME" || node.type === "COMPONENT") &&
+      node.width <= 32 && node.height <= 32) return true;
+  if ("children" in node) {
+    for (const child of (node as ChildrenMixin).children) {
+      if (hasIconChild(child as SceneNode)) return true;
+    }
+  }
+  return false;
+}
+
+/** Count direct meaningful children (skip invisible) */
+function countVisibleChildren(node: SceneNode): number {
+  if (!("children" in node)) return 0;
+  return (node as ChildrenMixin).children.filter(
+    (c) => (c as SceneNode).visible !== false
+  ).length;
+}
+
+/** Build variant info for a single node */
+async function buildVariantInfo(node: SceneNode): Promise<VariantInfo> {
+  const fields = await buildSpec(node);
+  const textContent = collectTextContent(node);
+  const icon = hasIconChild(node);
+  const childCount = countVisibleChildren(node);
+
+  let variantProperties: Record<string, string> = {};
+  if (node.type === "COMPONENT" && node.variantProperties) {
+    variantProperties = node.variantProperties;
+  } else if (node.type === "INSTANCE") {
+    const main = await (node as InstanceNode).getMainComponentAsync();
+    if (main?.variantProperties) variantProperties = main.variantProperties;
+  }
+
+  return {
+    name: node.name,
+    variantProperties,
+    fields,
+    textContent,
+    hasIcon: icon,
+    childCount,
+  };
+}
+
+/** Compare variants and generate facts */
+function generateFacts(variants: VariantInfo[], componentSetName: string): ComponentFact[] {
+  const facts: ComponentFact[] = [];
+
+  // ── Variant properties (what axes exist) ──
+  const allPropKeys = new Set<string>();
+  for (const v of variants) {
+    for (const key of Object.keys(v.variantProperties)) {
+      allPropKeys.add(key);
+    }
+  }
+
+  for (const key of allPropKeys) {
+    const values = [...new Set(variants.map((v) => v.variantProperties[key]).filter(Boolean))];
+    if (values.length > 0) {
+      facts.push({
+        fact: `Variant property "${key}" has values: ${values.join(", ")}`,
+        category: "structure",
+      });
+    }
+  }
+
+  // ── Build field maps for comparison ──
+  const fieldMaps = variants.map((v) => {
+    const m: Record<string, SpecField> = {};
+    for (const f of v.fields) m[f.label] = f;
+    return m;
+  });
+
+  const allLabels = new Set<string>();
+  for (const v of variants) {
+    for (const f of v.fields) allLabels.add(f.label);
+  }
+
+  // ── Find differences across variants ──
+  for (const label of allLabels) {
+    const valuesWithVariant: { value: string; source: string; variantName: string }[] = [];
+    for (let i = 0; i < variants.length; i++) {
+      const field = fieldMaps[i][label];
+      if (field) {
+        valuesWithVariant.push({
+          value: field.value,
+          source: field.source,
+          variantName: variants[i].name,
+        });
+      }
+    }
+
+    const uniqueValues = [...new Set(valuesWithVariant.map((v) => v.value))];
+
+    if (uniqueValues.length === 1) {
+      // Same across all variants — single fact
+      const src = valuesWithVariant[0].source;
+      const tokenInfo = src.startsWith("токен:") ? ` (${src})` : "";
+      facts.push({
+        fact: `${label} is ${uniqueValues[0]} across all variants${tokenInfo}`,
+        category: categorizeField(label),
+      });
+    } else {
+      // Different across variants — detail per variant
+      const diffs = valuesWithVariant.map((v) => {
+        const tokenInfo = v.source.startsWith("токен:") ? ` (${v.source})` : "";
+        return `${v.variantName}: ${v.value}${tokenInfo}`;
+      });
+      facts.push({
+        fact: `${label} differs across variants — ${diffs.join("; ")}`,
+        category: categorizeField(label),
+      });
+    }
+  }
+
+  // ── Token usage summary ──
+  const tokenNames = new Set<string>();
+  for (const v of variants) {
+    for (const f of v.fields) {
+      if (f.source.startsWith("токен:")) {
+        tokenNames.add(f.source.replace("токен:", "").trim());
+      }
+    }
+  }
+  if (tokenNames.size > 0) {
+    facts.push({
+      fact: `Design tokens used: ${[...tokenNames].join(", ")}`,
+      category: "tokens",
+    });
+  }
+
+  // ── Content patterns ──
+  const allTexts: string[] = [];
+  for (const v of variants) {
+    for (const t of v.textContent) allTexts.push(t);
+  }
+  const uniqueTexts = [...new Set(allTexts)];
+  if (uniqueTexts.length > 0) {
+    facts.push({
+      fact: `Text content found across variants: "${uniqueTexts.join('", "')}"`,
+      category: "content",
+    });
+  }
+
+  // ── Icon presence ──
+  const withIcon = variants.filter((v) => v.hasIcon);
+  const withoutIcon = variants.filter((v) => !v.hasIcon);
+  if (withIcon.length > 0 && withoutIcon.length > 0) {
+    facts.push({
+      fact: `Some variants have icons (${withIcon.map((v) => v.name).join(", ")}), others don't (${withoutIcon.map((v) => v.name).join(", ")})`,
+      category: "content",
+    });
+  } else if (withIcon.length === variants.length) {
+    facts.push({ fact: "All variants contain icon elements", category: "content" });
+  } else if (withIcon.length === 0) {
+    facts.push({ fact: "No variants contain icon elements", category: "content" });
+  }
+
+  // ── Child count patterns ──
+  const childCounts = [...new Set(variants.map((v) => v.childCount))];
+  if (childCounts.length === 1) {
+    facts.push({
+      fact: `All variants have ${childCounts[0]} direct child elements`,
+      category: "structure",
+    });
+  } else {
+    const details = variants.map((v) => `${v.name}: ${v.childCount} children`);
+    facts.push({
+      fact: `Child element count varies — ${details.join("; ")}`,
+      category: "structure",
+    });
+  }
+
+  return facts;
+}
+
+function categorizeField(label: string): ComponentFact["category"] {
+  if (label.startsWith("Font") || label === "Line Height" || label === "Letter Spacing")
+    return "typography";
+  if (label.startsWith("Padding") || label === "Gap") return "spacing";
+  if (label.startsWith("Fill") || label.startsWith("Stroke") || label === "Shadow" ||
+      label.startsWith("Shadow") || label.startsWith("Border Radius"))
+    return "visual";
+  return "structure";
+}
+
+/** Main entry: collect facts from multiple selected nodes */
+async function collectFactsFromSelection(nodes: readonly SceneNode[]): Promise<{
+  componentName: string;
+  variants: VariantInfo[];
+  facts: ComponentFact[];
+}> {
+  const variants = await Promise.all(nodes.map((n) => buildVariantInfo(n)));
+
+  // Try to derive a component set name
+  let componentName = "Component";
+  // Check if nodes belong to the same component set
+  for (const node of nodes) {
+    if (node.type === "COMPONENT" && node.parent?.type === "COMPONENT_SET") {
+      componentName = (node.parent as ComponentSetNode).name;
+      break;
+    }
+    if (node.type === "INSTANCE") {
+      const main = await (node as InstanceNode).getMainComponentAsync();
+      if (main?.parent?.type === "COMPONENT_SET") {
+        componentName = (main.parent as ComponentSetNode).name;
+        break;
+      }
+    }
+    // Fallback: use the common prefix of node names
+    if (componentName === "Component") {
+      const names = nodes.map((n) => n.name);
+      const prefix = commonPrefix(names);
+      if (prefix.length > 2) componentName = prefix.replace(/[\s/,=-]+$/, "");
+    }
+  }
+
+  const facts = generateFacts(variants, componentName);
+
+  return { componentName, variants, facts };
+}
+
+function commonPrefix(strings: string[]): string {
+  if (strings.length === 0) return "";
+  let prefix = strings[0];
+  for (let i = 1; i < strings.length; i++) {
+    while (strings[i].indexOf(prefix) !== 0) {
+      prefix = prefix.slice(0, -1);
+      if (prefix === "") return "";
+    }
+  }
+  return prefix;
+}
+
 // ─── Plugin entry point ──────────────────────────────────────────────────────
 
 figma.showUI(__html__, { width: 680, height: 580, themeColors: false });
@@ -498,7 +767,30 @@ async function analyzeSelection() {
   }
 
   if (sel.length > 1) {
-    figma.ui.postMessage({ type: "multi-selection" });
+    // Multi-selection → collect facts for spec generation
+    try {
+      const result = await collectFactsFromSelection(sel);
+      figma.ui.postMessage({
+        type: "component-facts-data",
+        payload: {
+          componentName: result.componentName,
+          variantCount: result.variants.length,
+          variants: result.variants.map((v) => ({
+            name: v.name,
+            variantProperties: v.variantProperties,
+            fields: v.fields,
+            textContent: v.textContent,
+            hasIcon: v.hasIcon,
+          })),
+          facts: result.facts,
+        },
+      });
+    } catch {
+      figma.ui.postMessage({
+        type: "error",
+        message: "Не вдалося проаналізувати виділені елементи.",
+      });
+    }
     return;
   }
 
