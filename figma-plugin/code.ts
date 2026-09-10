@@ -1013,7 +1013,45 @@ async function analyzeSelection() {
 
   const node = sel[0];
 
-  // Container scan (FRAME, SECTION, GROUP, COMPONENT_SET selected directly)
+  // COMPONENT_SET selected → collect facts from all children (variants)
+  if (node.type === "COMPONENT_SET") {
+    try {
+      const csNode = node as ComponentSetNode;
+      const allChildren = csNode.children as SceneNode[];
+      if (allChildren.length === 0) {
+        figma.ui.postMessage({ type: "no-components-in-frame" });
+        return;
+      }
+      // Limit to 30 variants to avoid performance issues
+      const children = allChildren.length > 30 ? allChildren.slice(0, 30) : allChildren;
+      const result = await collectFactsFromSelection(children);
+      // Override component name with the set name
+      figma.ui.postMessage({
+        type: "component-facts-data",
+        payload: {
+          componentName: csNode.name,
+          variantCount: result.variants.length,
+          variants: result.variants.map((v) => ({
+            name: v.name,
+            variantProperties: v.variantProperties,
+            fields: v.fields,
+            textContent: v.textContent,
+            hasIcon: v.hasIcon,
+          })),
+          facts: result.facts,
+          usageContexts: result.usageContexts,
+        },
+      });
+    } catch {
+      figma.ui.postMessage({
+        type: "error",
+        message: "Не вдалося проаналізувати Component Set.",
+      });
+    }
+    return;
+  }
+
+  // Container scan (FRAME, SECTION, GROUP selected directly — not COMPONENT_SET)
   if (isContainerForScan(node) && node.type !== "COMPONENT") {
     try {
       const components = findTopLevelComponents(

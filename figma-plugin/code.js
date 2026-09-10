@@ -856,7 +856,45 @@ async function analyzeSelection() {
         return;
     }
     const node = sel[0];
-    // Container scan (FRAME, SECTION, GROUP, COMPONENT_SET selected directly)
+    // COMPONENT_SET selected → collect facts from all children (variants)
+    if (node.type === "COMPONENT_SET") {
+        try {
+            const csNode = node;
+            const allChildren = csNode.children;
+            if (allChildren.length === 0) {
+                figma.ui.postMessage({ type: "no-components-in-frame" });
+                return;
+            }
+            // Limit to 30 variants to avoid performance issues
+            const children = allChildren.length > 30 ? allChildren.slice(0, 30) : allChildren;
+            const result = await collectFactsFromSelection(children);
+            // Override component name with the set name
+            figma.ui.postMessage({
+                type: "component-facts-data",
+                payload: {
+                    componentName: csNode.name,
+                    variantCount: result.variants.length,
+                    variants: result.variants.map((v) => ({
+                        name: v.name,
+                        variantProperties: v.variantProperties,
+                        fields: v.fields,
+                        textContent: v.textContent,
+                        hasIcon: v.hasIcon,
+                    })),
+                    facts: result.facts,
+                    usageContexts: result.usageContexts,
+                },
+            });
+        }
+        catch (_b) {
+            figma.ui.postMessage({
+                type: "error",
+                message: "Не вдалося проаналізувати Component Set.",
+            });
+        }
+        return;
+    }
+    // Container scan (FRAME, SECTION, GROUP selected directly — not COMPONENT_SET)
     if (isContainerForScan(node) && node.type !== "COMPONENT") {
         try {
             const components = findTopLevelComponents(node);
@@ -878,7 +916,7 @@ async function analyzeSelection() {
                 },
             });
         }
-        catch (_b) {
+        catch (_c) {
             figma.ui.postMessage({
                 type: "error",
                 message: "Не вдалося проаналізувати вміст фрейму.",
@@ -914,7 +952,7 @@ async function analyzeSelection() {
             return;
         }
     }
-    catch (_c) {
+    catch (_d) {
         // If variant resolution fails, fall through to single spec
     }
     // Single node — original behavior
@@ -929,7 +967,7 @@ async function analyzeSelection() {
             },
         });
     }
-    catch (_d) {
+    catch (_e) {
         figma.ui.postMessage({
             type: "error",
             message: "Не вдалося прочитати цей елемент. Спробуйте обрати компонент, а не текстовий шар чи довільну групу.",
